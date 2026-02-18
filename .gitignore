@@ -1,0 +1,21 @@
+# User data and SQLite databases
+data/midos/*.db
+data/midos/*.dat
+data/midos/*.sav*
+
+# Logs
+data/midos/*.log
+
+# Search Index / PDK data (Site-specific large files)
+data/midos/*.pdk
+data/midos/*.pd2
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
