@@ -36,7 +36,7 @@ Dies ist die moderne PHP-Portierung des ursprünglich Perl-basierten **MIDOS-WEB
 
 1. **Repository klonen**
    ```bash
-   git clone https://github.com/user/opac-php.git
+   git clone https://github.com/JustusHenke/opac-php.git
    cd opac-php
    ```
 
