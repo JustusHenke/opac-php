@@ -52,7 +52,6 @@ $fieldMap = [
     'qt' => ['val' => $qt, 'idx' => 2],
     'qp' => ['val' => $qp, 'idx' => 1],
     'qj' => ['val' => $qj, 'idx' => 6],
-    'qa' => ['val' => $qa, 'idx' => 18],
     'qs' => ['val' => $qs, 'idx' => 4],
 ];
 
@@ -231,11 +230,12 @@ log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
     require_once __DIR__ . '/UserData.php';
     $userData = new UserData($DATA_DIR);
     $username = $_SESSION['username'] ?? 'guest';
+    $isGuest = ($_SESSION['userid'] ?? '') === 'guest';
 
     foreach ($results as $idx => $res):
         $line = (int)$res['line'];
         $inCart = in_array($line, $cart, true);
-        $hasNote = $userData->getNote($username, $line) !== null;
+        $hasNote = !$isGuest && $userData->getNote($username, $line) !== null;
         ?>
         <div class="search-result">
             <div class="search-result-title">
@@ -254,8 +254,10 @@ log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
                        onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_add', this)"><?= htmlspecialchars(ueb('in Warenkorb'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
                 <?php endif; ?>
                 &nbsp;|&nbsp;
+                <?php if (!$isGuest): ?>
                 <a href="mnote.php?line=<?= $line ?>"><?= htmlspecialchars(ueb('Notiz'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
                 <span id="note-star-<?= $line ?>" style="color:var(--primary); <?= $hasNote ? '' : 'display:none;' ?>">★</span>
+                <?php endif; ?>
             </div>
             <div style="margin-top:4px;">
                 <?= $res['html'] ?>

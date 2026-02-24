@@ -8,9 +8,7 @@ $BASE_DIR   = __DIR__;
 $DATA_DIR   = $BASE_DIR . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR . 'midos';
 
 // Datenquellen (nur noch aus data/)
-$USER_FILE = $DATA_DIR . DIRECTORY_SEPARATOR . 'user.dat';
 $PDOK_PDK  = $DATA_DIR . DIRECTORY_SEPARATOR . 'pdok.pdk';
-$PDOK_PD2  = $DATA_DIR . DIRECTORY_SEPARATOR . 'pdok.pd2';
 /**
  * Hilfsfunktion: einfache Bool-Tokenisierung (AND/OR/NOT, keine Klammern).
  */
@@ -292,20 +290,6 @@ function ueb(string $text): string
  *
  * Rückgabe: Array von Datensätzen, jeder Datensatz ist ein Array der per „¿“ getrennten Felder.
  */
-function load_users(): array
-{
-    global $USER_FILE;
-    if (!is_readable($USER_FILE)) {
-        return [];
-    }
-    $lines = file($USER_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    $users = [];
-    foreach ($lines as $line) {
-        $line = mb_convert_encoding($line, 'UTF-8', 'ISO-8859-1');
-        $users[] = explode('¿', $line);
-    }
-    return $users;
-}
 
 /**
  * Sucht einen Benutzer anhand von Benutzername/Passwort.
@@ -317,27 +301,17 @@ function authenticate(string $username, string $password): ?array
     global $DATA_DIR;
     $userData = new UserData($DATA_DIR);
     $user = $userData->authenticateUser($username, $password);
-    
+
     if ($user) {
-        // Return in a format compatible with existing mlogin.php expectations
-        // Mapping SQLite fields to legacy-like array indexes for minimal disruption
         return [
             0 => $user['last_name'],
             1 => $user['first_name'],
             7 => $user['username'],
-            9 => $user['username'], // Reuse username as ID for DB users
+            9 => $user['username'],
             'is_db' => true
         ];
     }
 
-    // Legacy fallback (WARNUNG: Vergleicht Passwörter im Klartext!)
-    // Es wird empfohlen, alle Benutzer in die SQLite-Datenbank zu migrieren.
-    $users = load_users();
-    foreach ($users as $fields) {
-        if (($fields[7] ?? '') === $username && ($fields[8] ?? '') === $password) {
-            return $fields;
-        }
-    }
     return null;
 }
 

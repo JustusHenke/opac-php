@@ -170,6 +170,7 @@ if ($cart === []): ?>
                     <?= htmlspecialchars(ueb('aus Warenkorb entfernen'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
                 </a>
                 &nbsp;|&nbsp;
+                <?php if (($_SESSION['userid'] ?? '') !== 'guest'): ?>
                 <a href="mnote.php?line=<?= (int)$ln ?>"><?= htmlspecialchars(ueb('Notiz bearbeiten'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
                 <?php
                     require_once __DIR__ . '/UserData.php';
@@ -178,6 +179,7 @@ if ($cart === []): ?>
                         echo ' <span style="color:var(--primary);">★</span>';
                     }
                 ?>
+                <?php endif; ?>
             </div>
             <div style="margin-top:4px;">
                 <?= $rec['html'] ?>

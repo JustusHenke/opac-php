@@ -8,7 +8,7 @@ require_once __DIR__ . '/MidosIndex.php';
 
 $username = $_SESSION['username'];
 $docId = (int)req('line', '0');
-if ($docId <= 0) {
+if ($docId <= 0 || ($_SESSION['userid'] ?? '') === 'guest') {
     redirect('msuche.php');
 }
 

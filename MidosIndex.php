@@ -142,29 +142,24 @@ class MidosIndex
     public function getRecord(int $docId): ?string
     {
         if ($docId < 1) return null;
-        $pd2File = $this->dataDir . DIRECTORY_SEPARATOR . 'pdok.pd2';
         $pdkFile = $this->dataDir . DIRECTORY_SEPARATOR . 'pdok.pdk';
+        if (!file_exists($pdkFile)) return null;
 
-        if (!file_exists($pd2File) || !file_exists($pdkFile)) return null;
-
-        $offsetPos = ($docId - 1) * 11;
-        $fp = fopen($pd2File, 'rb');
-        if (!$fp) return null;
-        if (fseek($fp, $offsetPos) !== 0) { fclose($fp); return null; }
-        $offsetStr = fread($fp, 10);
-        fclose($fp);
-
-        if ($offsetStr === false || strlen($offsetStr) < 10) return null;
-        $offset = (int)$offsetStr;
+        $db = $this->getDb();
+        $stmt = $db->prepare("SELECT byte_offset FROM doc_offsets WHERE doc_id = ?");
+        $stmt->execute([$docId]);
+        $offset = $stmt->fetchColumn();
+        if ($offset === false) return null;
 
         $fp = fopen($pdkFile, 'rb');
         if (!$fp) return null;
-        if (fseek($fp, $offset) !== 0) { fclose($fp); return null; }
+        if (fseek($fp, (int)$offset) !== 0) { fclose($fp); return null; }
         $line = fgets($fp);
         fclose($fp);
 
         return $line !== false ? rtrim($line) : null;
     }
+
 
     private function mapIndexNumToField(int $num): string
     {
@@ -173,7 +168,7 @@ class MidosIndex
             2 => 'qt',
             4 => 'qs',
             6 => 'qj',
-            18 => 'qa',
+            7 => 'qy',
             default => 'q'
         };
     }
@@ -200,14 +195,20 @@ class MidosIndex
         if (file_exists($dbFile)) unlink($dbFile);
         $db = new PDO("sqlite:$dbFile");
         $db->exec("CREATE TABLE search_index (term TEXT, display_term TEXT, field TEXT, doc_id INTEGER)");
+        $db->exec("CREATE TABLE doc_offsets (doc_id INTEGER PRIMARY KEY, byte_offset INTEGER)");
         
         $stmt = $db->prepare("INSERT INTO search_index (term, display_term, field, doc_id) VALUES (?, ?, ?, ?)");
+        $stmtOffset = $db->prepare("INSERT INTO doc_offsets (doc_id, byte_offset) VALUES (?, ?)");
         $fp = fopen($pdkFile, 'rb');
         $docId = 0;
         $db->beginTransaction();
         
-        while (($line = fgets($fp)) !== false) {
+        while (true) {
+            $byteOffset = ftell($fp);
+            $line = fgets($fp);
+            if ($line === false) break;
             $docId++;
+            $stmtOffset->execute([$docId, $byteOffset]);
             $line = mb_convert_encoding($line, 'UTF-8', 'ISO-8859-1');
             $parts = explode('¿', trim($line));
             $fields = [];
@@ -239,11 +240,11 @@ class MidosIndex
                 $norm = $this->normalize($w);
                 if (strlen($norm) > 1) $stmt->execute([$norm, $w, 'qs', $docId]);
             }
-            // Abstract words
-            $abs = $fields['ABS'] ?? ($fields['ZUS'] ?? '');
-            foreach (array_unique(preg_split('/[^a-zA-Z0-9ÄÖÜäöüß]+/', $abs, -1, PREG_SPLIT_NO_EMPTY)) as $w) {
-                $norm = $this->normalize($w);
-                if (strlen($norm) > 3) $stmt->execute([$norm, $w, 'qa', $docId]);
+            // Year (ERJ / JA)
+            $year = trim($fields['ERJ'] ?? ($fields['JA'] ?? ''));
+            if ($year !== '') {
+                $norm = $this->normalize($year);
+                $stmt->execute([$norm, $year, 'qy', $docId]);
             }
 
             if ($docId % 2000 === 0) {

@@ -16,7 +16,7 @@ $indexes = [
     2 => 'Titel (Wörter)',
     4 => 'Schlagwörter',
     6 => 'Zeitschriften',
-    18 => 'Abstract (Wörter)'
+    7 => 'Jahre'
 ];
 
 if (!array_key_exists($idx, $indexes)) $idx = 1;
@@ -83,7 +83,7 @@ render_app_header(ueb('Index-Liste: ') . ueb($indexes[$idx]));
             1 => 'qp',
             2 => 'qt',
             6 => 'qj',
-            18 => 'qa',
+            7 => 'qy',
             default => 'qs'
         };
         

@@ -64,12 +64,6 @@ render_app_header(ueb('Login'));
     MIDOS-Version des OPAC.
 </p>
 
-<?php if (!is_readable($USER_FILE)): ?>
-    <p class="error">
-        <?= htmlspecialchars(ueb('Hinweis: Benutzerdatenbank ist nicht lesbar.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
-    </p>
-<?php endif; ?>
-
 <form method="post" action="mlogin.php">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(get_csrf_token()) ?>">
     <div>
@@ -87,12 +81,12 @@ render_app_header(ueb('Login'));
         <div class="error"><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div>
     <?php endif; ?>
 
-    <div style="margin-top: 16px;">
+    <div style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
         <button type="submit" class="btn btn-primary"><?= htmlspecialchars(ueb('Login'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></button>
         <button type="submit" name="usergast" value="1" class="btn">
             <?= htmlspecialchars(ueb('Gastzugang'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         </button>
-        <a href="mregister.php" class="btn" style="float: right;">
+        <a href="mregister.php" class="btn" style="margin-left: auto;">
             <?= htmlspecialchars(ueb('Registrieren'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         </a>
     </div>
