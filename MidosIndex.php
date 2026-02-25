@@ -106,13 +106,14 @@ class MidosIndex
         $prefix = $this->normalize($prefix);
         
         $db = $this->getDb();
+        // Use LIKE to match only terms starting with the prefix
         $stmt = $db->prepare("SELECT MIN(display_term) as term, COUNT(DISTINCT doc_id) as count 
                                     FROM search_index 
-                                    WHERE field = ? AND term >= ? 
+                                    WHERE field = ? AND term LIKE ? 
                                     GROUP BY term 
                                     ORDER BY term 
                                     LIMIT ?");
-        $stmt->execute([$field, $prefix, $limit]);
+        $stmt->execute([$field, $prefix . '%', $limit]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

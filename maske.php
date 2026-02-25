@@ -4,15 +4,49 @@ declare(strict_types=1);
 require __DIR__ . '/config.php';
 check_auth();
 
+global $PDOK_PDK;
+
 $q  = req('q', '');
 $qt = req('qt', ''); // Titel
 $qa = req('qa', ''); // Abstract / Zusammenfassung
 $qj = req('qj', ''); // Zeitschrift / Quelle
 $qp = req('qp', ''); // Personen / Verfasser
 
+// Bestandsinformationen ermitteln
+$totalEntries = 0;
+$lastUpdate = null;
+
+if (is_readable($PDOK_PDK)) {
+    // Anzahl der Einträge zählen
+    $fp = fopen($PDOK_PDK, 'r');
+    if ($fp) {
+        while (fgets($fp) !== false) {
+            $totalEntries++;
+        }
+        fclose($fp);
+    }
+    
+    // Datum der letzten Aktualisierung
+    $lastUpdate = filemtime($PDOK_PDK);
+}
+
 render_header($HTML_TITLE);
 render_app_header(ueb('Suchmaske'));
 ?>
+
+<?php if ($totalEntries > 0): ?>
+<div style="background-color: #f5f5f5; padding: 12px; margin-bottom: 16px; border-radius: 4px;">
+    <p style="margin: 0;">
+        <span class="muted"><?= htmlspecialchars(ueb('Bestandsinformationen:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?> 
+        <?= htmlspecialchars(ueb('Einträge im Bestand:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+        <?= number_format($totalEntries, 0, ',', '.') ?>, 
+        <?php if ($lastUpdate): ?>
+        <?= htmlspecialchars(ueb('Letzte Aktualisierung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+        <?= date('d.m.Y H:i', $lastUpdate) ?></span>
+        <?php endif; ?>
+    </p>
+</div>
+<?php endif; ?>
 
 <p class="muted">
     Erweiterte PHP-Suchmaske mit Mehrfeld-Suche und einfacher Bool-Logik

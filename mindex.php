@@ -23,22 +23,21 @@ if (!array_key_exists($idx, $indexes)) $idx = 1;
 
 $midosIndex = new MidosIndex($DATA_DIR);
 
-// Logic for A-Z Jumping
+// Bei gesetztem Start-Parameter: Nur Terme mit diesem Präfix
 if ($start !== '') {
-    // If start is set, we use the start term to find the offset? 
-    // Actually, it's easier to just use the start term logic as before, 
-    // but if we want numeric pagination, we stick to it.
-    // If user typed something in "Start ab", we jump to that page or just show from there.
-}
-
-$totalTerms = $midosIndex->getTermCount($idx);
-$totalPages = (int)ceil($totalTerms / $limit);
-
-if ($start !== '') {
-    $terms = $midosIndex->getTerms($idx, $start, $limit);
-    // Find approximate offset for start term? (Optional, might be complex)
-    $page = 1; // Reset to 1 for term-based browsing
+    // Alle Terme mit diesem Präfix holen (für Paginierung)
+    $allTermsWithPrefix = $midosIndex->getTerms($idx, $start, 999999);
+    $totalTerms = count($allTermsWithPrefix);
+    $totalPages = (int)ceil($totalTerms / $limit);
+    
+    // Nur die aktuelle Seite anzeigen
+    $offset = ($page - 1) * $limit;
+    $terms = array_slice($allTermsWithPrefix, $offset, $limit);
 } else {
+    // Ohne Start-Parameter: Alle Terme
+    $totalTerms = $midosIndex->getTermCount($idx);
+    $totalPages = (int)ceil($totalTerms / $limit);
+    
     $offset = ($page - 1) * $limit;
     if ($offset < 0) $offset = 0;
     $terms = $midosIndex->getTermsByOffset($idx, $offset, $limit);
@@ -103,19 +102,19 @@ render_app_header(ueb('Index-Liste: ') . ueb($indexes[$idx]));
 
     <!-- Pagination UI -->
     <div style="margin-top: 30px; display: flex; justify-content: center; align-items: center; gap: 10px;">
+        <?php 
+        $startParam = $start !== '' ? '&amp;start=' . urlencode($start) : '';
+        ?>
         <?php if ($page > 1): ?>
-            <a href="mindex.php?idx=<?= $idx ?>&amp;page=1" class="btn btn-small">« First</a>
-            <a href="mindex.php?idx=<?= $idx ?>&amp;page=<?= $page - 1 ?>" class="btn btn-small">‹ Prev</a>
+            <a href="mindex.php?idx=<?= $idx ?><?= $startParam ?>&amp;page=1" class="btn btn-small">« Erste</a>
+            <a href="mindex.php?idx=<?= $idx ?><?= $startParam ?>&amp;page=<?= $page - 1 ?>" class="btn btn-small">‹ Vorherige</a>
         <?php endif; ?>
 
         <span class="muted"><?= ueb('Seite') ?> <strong><?= $page ?></strong> <?= ueb('von') ?> <?= $totalPages ?></span>
 
         <?php if ($page < $totalPages): ?>
-            <?php 
-                $nextStart = ($terms && count($terms) >= $limit) ? $terms[count($terms)-1]['term'] : '';
-            ?>
-            <a href="mindex.php?idx=<?= $idx ?>&amp;page=<?= $page + 1 ?>" class="btn btn-small">Next ›</a>
-            <a href="mindex.php?idx=<?= $idx ?>&amp;page=<?= $totalPages ?>" class="btn btn-small">Last »</a>
+            <a href="mindex.php?idx=<?= $idx ?><?= $startParam ?>&amp;page=<?= $page + 1 ?>" class="btn btn-small">N&auml;chste ›</a>
+            <a href="mindex.php?idx=<?= $idx ?><?= $startParam ?>&amp;page=<?= $totalPages ?>" class="btn btn-small">Letzte »</a>
         <?php endif; ?>
     </div>
 <?php endif;
