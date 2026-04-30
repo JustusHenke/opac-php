@@ -37,23 +37,24 @@ if ($record) {
 
 render_header($HTML_TITLE . ' - Notiz');
 render_app_header(ueb('Notiz bearbeiten'));
-
 ?>
 
 <div class="search-box">
     <h3><?= htmlspecialchars($title) ?></h3>
-    <p class="muted">Dokument-ID: <?= $docId ?></p>
+    <p class="status-muted">Dokument-ID: <?= $docId ?></p>
 
     <?php if ($message): ?>
-        <p class="success"><?= htmlspecialchars($message) ?></p>
+        <p class="status-success"><?= htmlspecialchars($message) ?></p>
     <?php endif; ?>
 
     <form method="post" action="mnote.php?line=<?= $docId ?>&amp;action=save">
         <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(get_csrf_token()) ?>">
-        <label for="content" class="field-label"><?= htmlspecialchars(ueb('Ihre persönliche Notiz:')) ?></label>
-        <textarea name="content" id="content" class="input-text" style="height: 150px;"><?= htmlspecialchars($noteText) ?></textarea>
+        <div class="form-group">
+            <label for="content" class="form-label"><?= htmlspecialchars(ueb('Ihre persönliche Notiz:')) ?></label>
+            <textarea name="content" id="content" class="form-input" style="height: 150px;"><?= htmlspecialchars($noteText) ?></textarea>
+        </div>
         
-        <div style="margin-top: 20px;">
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
             <button type="submit" class="btn btn-primary"><?= htmlspecialchars(ueb('Speichern')) ?></button>
             <a href="msuche.php" class="btn"><?= htmlspecialchars(ueb('Abbrechen')) ?></a>
         </div>

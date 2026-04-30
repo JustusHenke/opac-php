@@ -125,7 +125,7 @@ render_header($HTML_TITLE);
 render_app_header(ueb('Warenkorb'));
 
 if (!is_readable($PDOK_PDK)): ?>
-    <p class="error">
+    <p class="status-error">
         <?= htmlspecialchars(ueb('Datenbank ist nicht lesbar – Warenkorb kann nicht angezeigt werden.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
     </p>
 <?php
@@ -137,15 +137,20 @@ $cart = $_SESSION['cart'];
 sort($cart);
 
 if ($cart === []): ?>
-    <p class="muted">
+    <p class="status-muted">
         <?= htmlspecialchars(ueb('Der Warenkorb ist leer.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
     </p>
 <?php else: ?>
-    <p class="muted">
-        <?= htmlspecialchars(ueb('Dokumente im Warenkorb:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
-        <a href="mtools.php?action=export_bibtex" class="btn btn-small" style="float: right; margin-left: 10px; background-color: var(--secondary); color: white; text-decoration: none; padding: 4px 8px; border-radius: 4px;">BibTeX Export</a>
-        <a href="mtools.php?action=clear" class="btn btn-small" style="float: right; background-color: #d9534f; color: white; text-decoration: none; padding: 4px 8px; border-radius: 4px;">Warenkorb leeren</a>
-    </p>
+    <div class="cart-stats">
+        <span class="muted">
+            <?= htmlspecialchars(ueb('Dokumente im Warenkorb:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+            <strong><?= count($cart) ?></strong>
+        </span>
+        <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+            <a href="mtools.php?action=export_bibtex" class="btn btn-sm" style="background-color: var(--secondary); color: white;">BibTeX Export</a>
+            <a href="mtools.php?action=clear" class="btn btn-sm btn-danger">Warenkorb leeren</a>
+        </div>
+    </div>
 
     <?php
     require_once __DIR__ . '/MidosIndex.php';
@@ -160,39 +165,39 @@ if ($cart === []): ?>
         $raw = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
         $rec = format_pdok_record($raw);
         ?>
-        <div class="search-result">
-            <div class="search-result-title">
-                <?= (int)$ln ?>.
+        <div class="result-card">
+            <div class="result-title">
+                <span class="result-number"><?= (int)$ln ?>.</span>
                 <?= htmlspecialchars($rec['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
             </div>
-            <div class="muted">
-                <a href="mtools.php?action=cart_remove&amp;line=<?= (int)$ln ?>" onclick="event.preventDefault(); toggleCart(<?= (int)$ln ?>, 'cart_remove', this); this.closest('.search-result').style.display='none';">
+            <div class="result-meta">
+                <a href="mtools.php?action=cart_remove&amp;line=<?= (int)$ln ?>" 
+                   onclick="event.preventDefault(); toggleCart(<?= (int)$ln ?>, 'cart_remove', this); this.closest('.result-card').style.display='none';" 
+                   class="btn btn-sm" style="color:var(--accent-red);">
                     <?= htmlspecialchars(ueb('aus Warenkorb entfernen'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
                 </a>
-                &nbsp;|&nbsp;
                 <?php if (($_SESSION['userid'] ?? '') !== 'guest'): ?>
-                <a href="mnote.php?line=<?= (int)$ln ?>"><?= htmlspecialchars(ueb('Notiz bearbeiten'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
-                <?php
-                    require_once __DIR__ . '/UserData.php';
-                    $userData = new UserData($DATA_DIR);
-                    if ($userData->getNote($_SESSION['username'], (int)$ln)) {
-                        echo ' <span style="color:var(--primary);">★</span>';
-                    }
-                ?>
+                    <a href="mnote.php?line=<?= (int)$ln ?>" class="btn btn-sm"><?= htmlspecialchars(ueb('Notiz bearbeiten'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
+                    <?php
+                        require_once __DIR__ . '/UserData.php';
+                        $userData = new UserData($DATA_DIR);
+                        if ($userData->getNote($_SESSION['username'], (int)$ln)) {
+                            echo ' <span style="color:var(--primary);">★</span>';
+                        }
+                    ?>
                 <?php endif; ?>
             </div>
-            <div style="margin-top:4px;">
+            <div>
                 <?= $rec['html'] ?>
             </div>
         </div>
     <?php endforeach; ?>
 <?php endif; ?>
 
-<p style="margin-top:16px;">
+<p style="margin-top:24px; display: flex; gap: 12px; flex-wrap: wrap;">
     <a class="btn" href="maske.php"><?= htmlspecialchars(ueb('Zurück zur Suchmaske'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
     <a class="btn" href="mlogin.php?action=logout"><?= htmlspecialchars(ueb('Logout'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
 </p>
 
 <?php
 render_footer();
-

@@ -42,8 +42,8 @@ if ($action === 'view' && $profileId > 0):
     if ($current):
         $items = $userData->getProfileItems($profileId);
         ?>
-        <h3><?= htmlspecialchars($current['profile_name']) ?></h3>
-        <p class="muted"><?= count($items) ?> <?= ueb('Dokumente') ?></p>
+        <h3 style="font-size: var(--size-xl); font-weight: 600; margin-bottom: 8px; color: var(--secondary);"><?= htmlspecialchars($current['profile_name']) ?></h3>
+        <p class="status-muted" style="margin-bottom: 20px;"><?= count($items) ?> <?= ueb('Dokumente') ?></p>
         
         <?php foreach ($items as $ln): 
             $raw = $midosIndex->getRecord((int)$ln);
@@ -51,16 +51,16 @@ if ($action === 'view' && $profileId > 0):
             $raw = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
             $rec = format_pdok_record($raw);
             ?>
-            <div class="search-result">
-                <div class="search-result-title"><?= (int)$ln ?>. <?= htmlspecialchars($rec['title']) ?></div>
-                <div class="muted">
+            <div class="result-card">
+                <div class="result-title"><?= (int)$ln ?>. <?= htmlspecialchars($rec['title']) ?></div>
+                <div class="result-meta">
                     <a href="mnote.php?line=<?= (int)$ln ?>"><?= ueb('Notiz') ?></a>
                 </div>
                 <?= $rec['html'] ?>
             </div>
         <?php endforeach; ?>
         
-        <p style="margin-top:20px;">
+        <p style="margin-top:24px;">
             <a href="mprofiles.php" class="btn"><?= ueb('Zurück zur Übersicht') ?></a>
         </p>
     <?php endif;
@@ -68,42 +68,36 @@ if ($action === 'view' && $profileId > 0):
 else:
     $profiles = $userData->getProfiles($username);
     if (empty($profiles)): ?>
-        <p class="muted"><?= ueb('Sie haben noch keine Sammlungen gespeichert.') ?></p>
+        <p class="status-muted"><?= ueb('Sie haben noch keine Sammlungen gespeichert.') ?></p>
     <?php else: ?>
-        <table class="table" style="width:100%; border-collapse: collapse; margin-top:20px;">
-            <thead>
-                <tr style="border-bottom: 2px solid var(--border-color); text-align:left;">
-                    <th style="padding:10px;"><?= ueb('Name') ?></th>
-                    <th style="padding:10px;"><?= ueb('Erstellt am') ?></th>
-                    <th style="padding:10px;"><?= ueb('Aktion') ?></th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php foreach ($profiles as $p): ?>
-                    <tr style="border-bottom: 1px solid var(--tertiary);">
-                        <td style="padding:10px;">
-                            <a href="mprofiles.php?action=view&amp;id=<?= $p['id'] ?>" style="font-weight:600;">
-                                <?= htmlspecialchars($p['profile_name']) ?>
-                            </a>
-                        </td>
-                        <td style="padding:10px;"><?= $p['created_at'] ?></td>
-                        <td style="padding:10px;">
-                            <a href="mprofiles.php?action=delete&amp;id=<?= $p['id'] ?>" style="color:#d9534f;" onclick="return confirm('Sicher?')"><?= ueb('Löschen') ?></a>
-                        </td>
-                    </tr>
-                <?php endforeach; ?>
-            </tbody>
-        </table>
+        <div class="profile-list">
+            <?php foreach ($profiles as $p): ?>
+                <div class="profile-card">
+                    <div class="profile-info">
+                        <a href="mprofiles.php?action=view&amp;id=<?= $p['id'] ?>" style="font-weight:600; color: var(--secondary);">
+                            <div class="profile-name"><?= htmlspecialchars($p['profile_name']) ?></div>
+                        </a>
+                        <div class="profile-date"><?= $p['created_at'] ?></div>
+                    </div>
+                    <a href="mprofiles.php?action=delete&amp;id=<?= $p['id'] ?>" 
+                       class="btn btn-sm btn-danger" 
+                       onclick="return confirm('Sicher?')"><?= ueb('Löschen') ?></a>
+                </div>
+            <?php endforeach; ?>
+        </div>
     <?php endif; ?>
 
-    <div class="search-box" style="margin-top:40px;">
-        <h4><?= ueb('Neue Sammlung aus Warenkorb erstellen') ?></h4>
+    <div class="search-box" style="margin-top: 40px;">
+        <h3><?= ueb('Neue Sammlung aus Warenkorb erstellen') ?></h3>
         <?php if (empty($_SESSION['cart'])): ?>
-            <p class="muted"><?= ueb('Ihr Warenkorb ist leer.') ?></p>
+            <p class="status-muted"><?= ueb('Ihr Warenkorb ist leer.') ?></p>
         <?php else: ?>
-            <form method="post" action="mprofiles.php?action=create_from_cart">
+            <form method="post" action="mprofiles.php?action=create_from_cart" style="display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end;">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(get_csrf_token()) ?>">
-                <input type="text" name="name" placeholder="<?= ueb('Name der Sammlung...') ?>" class="input-text" style="width:250px;" required>
+                <div>
+                    <label class="form-label" for="profile-name"><?= ueb('Name der Sammlung') ?></label>
+                    <input type="text" name="name" id="profile-name" placeholder="<?= ueb('Name der Sammlung...') ?>" class="form-input" style="width:250px;" required>
+                </div>
                 <button type="submit" class="btn btn-primary"><?= ueb('Warenkorb speichern') ?></button>
             </form>
         <?php endif; ?>

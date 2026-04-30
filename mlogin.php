@@ -60,38 +60,37 @@ render_header($HTML_TITLE);
 render_app_header(ueb('Login'));
 ?>
 
-<p class="muted">
+<p class="status-muted" style="margin-bottom: 16px;">
     MIDOS-Version des OPAC.
 </p>
 
+<div class="search-box">
 <form method="post" action="mlogin.php">
     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(get_csrf_token()) ?>">
-    <div>
-        <label class="field-label" for="username"><?= htmlspecialchars(ueb('Benutzername:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
-        <input class="input-text" type="text" name="username" id="username"
+    <div class="form-group">
+        <label class="form-label" for="username"><?= htmlspecialchars(ueb('Benutzername:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="text" name="username" id="username"
                value="<?= htmlspecialchars($username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     </div>
 
-    <div>
-        <label class="field-label" for="password"><?= htmlspecialchars(ueb('Passwort:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
-        <input class="input-text" type="password" name="password" id="password" value="">
+    <div class="form-group">
+        <label class="form-label" for="password"><?= htmlspecialchars(ueb('Passwort:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="password" name="password" id="password" value="">
     </div>
 
     <?php if ($error !== ''): ?>
-        <div class="error"><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div>
+        <div class="status-error"><?= htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></div>
     <?php endif; ?>
 
-    <div style="margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;">
+    <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
         <button type="submit" class="btn btn-primary"><?= htmlspecialchars(ueb('Login'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></button>
         <button type="submit" name="usergast" value="1" class="btn">
             <?= htmlspecialchars(ueb('Gastzugang'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         </button>
-        <a href="mregister.php" class="btn" style="margin-left: auto;">
-            <?= htmlspecialchars(ueb('Registrieren'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
-        </a>
+        <a href="mregister.php" class="btn"><?= htmlspecialchars(ueb('Registrieren'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
     </div>
 </form>
+</div>
 
 <?php
 render_footer();
-

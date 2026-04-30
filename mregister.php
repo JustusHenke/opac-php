@@ -41,33 +41,33 @@ render_app_header(ueb('Registrierung'));
 
 <div class="search-box">
     <?php if ($success): ?>
-        <p class="success"><?= htmlspecialchars(ueb('Registrierung erfolgreich! Sie können sich jetzt anmelden.')) ?></p>
+        <p class="status-success"><?= htmlspecialchars(ueb('Registrierung erfolgreich! Sie können sich jetzt anmelden.')) ?></p>
         <p><a href="mlogin.php" class="btn btn-primary"><?= htmlspecialchars(ueb('Zum Login')) ?></a></p>
     <?php else: ?>
         <form method="post" action="mregister.php">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(get_csrf_token()) ?>">
-            <div>
-                <label class="field-label" for="username"><?= htmlspecialchars(ueb('Benutzername:')) ?></label>
-                <input class="input-text" type="text" name="username" id="username" required>
+            <div class="form-group">
+                <label class="form-label" for="username"><?= htmlspecialchars(ueb('Benutzername:')) ?></label>
+                <input class="form-input" type="text" name="username" id="username" required>
             </div>
-            <div>
-                <label class="field-label" for="password"><?= htmlspecialchars(ueb('Passwort:')) ?></label>
-                <input class="input-text" type="password" name="password" id="password" required>
+            <div class="form-group">
+                <label class="form-label" for="password"><?= htmlspecialchars(ueb('Passwort:')) ?></label>
+                <input class="form-input" type="password" name="password" id="password" required>
             </div>
-            <div>
-                <label class="field-label" for="first_name"><?= htmlspecialchars(ueb('Vorname:')) ?></label>
-                <input class="input-text" type="text" name="first_name" id="first_name">
+            <div class="form-group">
+                <label class="form-label" for="first_name"><?= htmlspecialchars(ueb('Vorname:')) ?></label>
+                <input class="form-input" type="text" name="first_name" id="first_name">
             </div>
-            <div>
-                <label class="field-label" for="last_name"><?= htmlspecialchars(ueb('Nachname:')) ?></label>
-                <input class="input-text" type="text" name="last_name" id="last_name">
+            <div class="form-group">
+                <label class="form-label" for="last_name"><?= htmlspecialchars(ueb('Nachname:')) ?></label>
+                <input class="form-input" type="text" name="last_name" id="last_name">
             </div>
 
             <?php if ($error !== ''): ?>
-                <div class="error"><?= htmlspecialchars($error) ?></div>
+                <div class="status-error"><?= htmlspecialchars($error) ?></div>
             <?php endif; ?>
 
-            <div style="margin-top: 16px;">
+            <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
                 <button type="submit" class="btn btn-primary"><?= htmlspecialchars(ueb('Registrieren')) ?></button>
                 <a href="mlogin.php" class="btn"><?= htmlspecialchars(ueb('Abbrechen')) ?></a>
             </div>

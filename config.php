@@ -165,10 +165,10 @@ function render_header(string $title): void
     echo '<title>' . htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</title>\n";
     echo "<style>
     :root {
-      --primary: #0070c0; /* blue */
-      --secondary: #003f7a; /* darkblue */
-      --tertiary: #ededed; /* light grey */
-      --quartary: #badbff; /* light blue */
+      --primary: #0070c0;
+      --secondary: #003f7a;
+      --tertiary: #ededed;
+      --quartary: #badbff;
       --xsmall: 12px;
       --small: 13px;
       --copy: 15px;
@@ -216,7 +216,25 @@ function render_header(string $title): void
     .error { color: #d32f2f; background: #ffebee; padding: 10px; border-radius: 4px; border: 1px solid #ffcdd2; }
     .success { color: #388e3c; background: #e8f5e9; padding: 10px; border-radius: 4px; border: 1px solid #c8e6c9; }
     </style>\n";
+    echo '<link rel="stylesheet" href="styles.css">' . "\n";
     echo <<<'EOD'
+    <script>
+    (function() {
+      var saved = localStorage.getItem('opac-theme');
+      if (saved) { document.documentElement.setAttribute('data-theme', saved); }
+      else if (window.matchMedia('(prefers-color-scheme: dark)').matches) { document.documentElement.setAttribute('data-theme', 'dark'); }
+    })();
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('opac-theme', next);
+    }
+    function toggleMobileNav() {
+      var nav = document.getElementById('app-nav');
+      if (nav) nav.classList.toggle('open');
+    }
+    </script>
     <script>
     async function toggleCart(line, action, el) {
         try {
@@ -243,6 +261,7 @@ function render_header(string $title): void
     </script>
 EOD;
     echo "</head>\n<body>\n";
+    echo '<a class="skip-link" href="#main">Zum Inhalt springen</a>' . "\n";
 }
 
 /**
@@ -250,6 +269,7 @@ EOD;
  */
 function render_footer(): void
 {
+    echo "</div>\n";
     echo "</body>\n</html>";
 }
 
@@ -259,22 +279,25 @@ function render_footer(): void
 function render_app_header(string $pageTitle): void
 {
     $username = $_SESSION['username'] ?? null;
-    echo "<div class=\"container\">\n";
-    echo "  <div class=\"header\">\n";
-    echo '    <div class="header-title">' . htmlspecialchars($pageTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</div>\n";
-    echo '    <div class="login-info">';
+    echo '<div class="app-container">' . "\n";
+    echo '<div class="app-header">' . "\n";
+    echo '  <div class="app-title">' . htmlspecialchars($pageTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</div>\n";
+    echo '  <div class="app-nav" id="app-nav">' . "\n";
     if ($username) {
-        echo 'Angemeldet als <strong>' . htmlspecialchars($username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</strong>'
-            . ' &nbsp;|&nbsp; <a href="maske.php">Suche</a>'
-            . ' &nbsp;|&nbsp; <a href="mindex.php">' . htmlspecialchars(ueb('Index')) . '</a>'
-            . ' &nbsp;|&nbsp; <a href="mprofiles.php">' . htmlspecialchars(ueb('Sammlungen')) . '</a>'
-            . ' &nbsp;|&nbsp; <a href="mtools.php?action=cart_view">' . htmlspecialchars(ueb('Warenkorb')) . '</a>'
-            . ' &nbsp;|&nbsp; <a href="mlogin.php?action=logout">Logout</a>';
+        echo '    <a class="nav-link" href="maske.php">' . htmlspecialchars(ueb('Suche')) . '</a>' . "\n";
+        echo '    <a class="nav-link" href="mindex.php">' . htmlspecialchars(ueb('Index')) . '</a>' . "\n";
+        echo '    <a class="nav-link" href="mprofiles.php">' . htmlspecialchars(ueb('Sammlungen')) . '</a>' . "\n";
+        echo '    <a class="nav-link" href="mtools.php?action=cart_view">' . htmlspecialchars(ueb('Warenkorb')) . '</a>' . "\n";
+        echo '    <a class="nav-link" href="mlogin.php?action=logout">' . htmlspecialchars(ueb('Logout')) . '</a>' . "\n";
     } else {
-        echo '<a class="btn btn-primary" href="mlogin.php" style="color: white; padding: 4px 10px;">Login</a>';
+        echo '    <a class="btn btn-primary" href="mlogin.php">' . htmlspecialchars(ueb('Login')) . '</a>' . "\n";
     }
-    echo "</div>\n";
+    echo '    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Design wechseln" title="Helles/Dunkles Design">🌓</button>' . "\n";
+    if ($username) {
+        echo '    <button class="mobile-nav-toggle" onclick="toggleMobileNav()" aria-label="Menü öffnen">☰</button>' . "\n";
+    }
     echo "  </div>\n";
+    echo "</div>\n";
 }
 
 /**
@@ -388,15 +411,13 @@ function format_pdok_record(string $raw): array
     }
 
     // HTML Zusammenbauen
-    $html  = '<div style="margin-bottom: 6px;">';
+    $html  = '<div class="record-content">';
     
     // Volltext / PDF Link
     if ($url !== '') {
-        $html .= '<div style="margin-bottom: 10px; background: #f9f9f9; padding: 6px; border-left: 4px solid var(--primary);">
-                    <a href="' . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '" target="_blank" style="font-weight:600; color:var(--primary);">
-                        <span style="margin-right:5px;">📄</span>' . htmlspecialchars(ueb('Volltext anzeigen / PDF öffnen')) . '
-                    </a>
-                  </div>';
+        $html .= '<a class="fulltext-link" href="' . htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '" target="_blank">'
+                    . '<span>📄</span>' . htmlspecialchars(ueb('Volltext anzeigen / PDF öffnen'))
+                    . '</a>';
     }
 
     // Verfasser
@@ -409,11 +430,11 @@ function format_pdok_record(string $raw): array
             if ($a === '') continue;
             // Link zur Personensuche (qp)
             $link = 'msuche.php?qp=' . urlencode('"' . $a . '"');
-            $authorLinks[] = '<a href="' . $link . '" style="color: var(--secondary); text-decoration: none;">' 
+            $authorLinks[] = '<a class="author-link" href="' . $link . '">' 
                            . htmlspecialchars($a, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</a>';
         }
         
-        $html .= '<div style="font-size: var(--default); color: var(--text-color); margin-bottom: 2px;">' 
+        $html .= '<div class="author-links">' 
               . implode(' &nbsp;|&nbsp; ', $authorLinks) 
               . '</div>';
     }
@@ -441,17 +462,17 @@ function format_pdok_record(string $raw): array
     }
     
     if ($sourceStr !== '') {
-        $html .= '<div style="color: #555; margin-bottom: 4px;">' . $sourceStr . '</div>';
+        $html .= '<div class="source-info">' . $sourceStr . '</div>';
     }
 
     // Signatur und ID
     $sigStr = '';
     if ($sig !== '') {
-        $sigStr .= '<span style="background: var(--tertiary); padding: 2px 6px; border-radius: 3px; font-weight: 600; font-size: var(--small);">SIG: ' 
+        $sigStr .= '<span class="badge">SIG: ' 
                 . htmlspecialchars($sig, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</span> ';
     }
     if ($isbn !== '') {
-        $sigStr .= '<span style="color: #666; font-size: var(--small); margin-left: 8px;">ISBN/ISSN: ' 
+        $sigStr .= '<span class="badge" style="background: transparent; color: var(--text-muted);">ISBN/ISSN: ' 
                 . htmlspecialchars($isbn, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</span>';
     }
 
@@ -459,29 +480,24 @@ function format_pdok_record(string $raw): array
         $html .= '<div style="margin-top: 6px; margin-bottom: 8px;">' . $sigStr . '</div>';
     }
 
-    // Abstract (gekürzt?)
+    // Abstract
     if ($abstract !== '') {
-        if (strlen($abstract) > 300) {
-            $short = substr($abstract, 0, 300) . '...';
-            // Einfacher Toggle wäre schön, aber JS ist hier minimal. Zeigen wir es ganz oder gekürzt.
-            // Zeigen wir es ganz, es ist eine Detailansicht in der Liste.
-        }
-        $html .= '<div style="margin-top: 8px; font-size: var(--small); color: #333; line-height: 1.4;"><strong>Abstract:</strong> ' 
+        $html .= '<div class="abstract-text"><strong>Abstract:</strong> ' 
               . htmlspecialchars($abstract, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</div>';
     }
     
     $html .= '</div>';
     
-    // Debug / Alle Felder (auskommentiert oder togglebar?)
-    // Wir lassen die rohen Felder erstmal weg oder packen sie in einen <details> block
-    $html .= '<details style="margin-top: 8px; font-size: var(--xsmall); color: #777;">';
+    // Debug / Alle Felder (togglebar)
+    $html .= '<details class="record-details">';
     $html .= '<summary>Alle Felder anzeigen</summary>';
+    $html .= '<div class="details-content">';
     foreach ($fields as $name => $value) {
         if (substr($name, 0, 1) === '@') continue; // Interne Felder ausblenden
-        $html .= '<div><strong>' . htmlspecialchars($name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . ':</strong> ' 
+        $html .= '<div class="field-row"><span class="field-label">' . htmlspecialchars($name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . ':</span> ' 
               . htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</div>';
     }
-    $html .= '</details>';
+    $html .= '</div></details>';
 
     return [
         'title' => (string)$title,

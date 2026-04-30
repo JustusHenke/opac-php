@@ -35,11 +35,11 @@ render_app_header(ueb('Suchmaske'));
 ?>
 
 <?php if ($totalEntries > 0): ?>
-<div style="background-color: #f5f5f5; padding: 12px; margin-bottom: 16px; border-radius: 4px;">
+<div class="status-info" style="margin-bottom: 16px;">
     <p style="margin: 0;">
-        <span class="muted"><?= htmlspecialchars(ueb('Bestandsinformationen:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?> 
+        <span class="muted"><?= htmlspecialchars(ueb('Bestandsinformationen:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= htmlspecialchars(ueb('Einträge im Bestand:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
-        <?= number_format($totalEntries, 0, ',', '.') ?>, 
+        <?= number_format($totalEntries, 0, ',', '.') ?>,
         <?php if ($lastUpdate): ?>
         <?= htmlspecialchars(ueb('Letzte Aktualisierung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= date('d.m.Y H:i', $lastUpdate) ?></span>
@@ -48,57 +48,58 @@ render_app_header(ueb('Suchmaske'));
 </div>
 <?php endif; ?>
 
-<p class="muted">
-    Erweiterte PHP-Suchmaske mit Mehrfeld-Suche und einfacher Bool-Logik
-    (AND / OR / NOT innerhalb der Felder, sequentielle Suche über <code>pdok.pdk</code>).
+<p class="status-muted" style="margin-bottom: 16px;">
+    Erweiterte Suchmaske mit Mehrfeld-Suche und einfacher Bool-Logik
+    (AND / OR / NOT innerhalb der Felder).
 </p>
 
+<div class="search-box">
 <form method="get" action="msuche.php">
-    <div>
-        <label class="field-label" for="q"><?= htmlspecialchars(ueb('Freitext (alle Felder):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
-        <input class="input-text" type="text" name="q" id="q"
+    <div class="form-group">
+        <label class="form-label" for="q"><?= htmlspecialchars(ueb('Freitext (alle Felder):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="text" name="q" id="q"
                placeholder="<?= htmlspecialchars(ueb('Begriff(e), werden auf den gesamten Datensatz angewendet'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
                value="<?= htmlspecialchars($q, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     </div>
 
-    <div style="margin-top: 12px;">
-        <label class="field-label" for="qt"><?= htmlspecialchars(ueb('Titel (Feld T/TI):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
-        <input class="input-text" type="text" name="qt" id="qt"
+    <div class="form-group">
+        <label class="form-label" for="qt"><?= htmlspecialchars(ueb('Titel (Feld T/TI):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="text" name="qt" id="qt"
                placeholder="<?= htmlspecialchars(ueb('Beispiele: KI AND Forschung, NOT Rezension'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
                value="<?= htmlspecialchars($qt, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     </div>
 
-    <div style="margin-top: 8px;">
-        <label class="field-label" for="qa"><?= htmlspecialchars(ueb('Zusammenfassung (Feld ABS/ZUS):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
-        <input class="input-text" type="text" name="qa" id="qa"
+    <div class="form-group">
+        <label class="form-label" for="qa"><?= htmlspecialchars(ueb('Zusammenfassung (Feld ABS/ZUS):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="text" name="qa" id="qa"
                value="<?= htmlspecialchars($qa, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     </div>
 
-    <div style="margin-top: 8px;">
-        <label class="field-label" for="qj"><?= htmlspecialchars(ueb('Zeitschrift / Quelle (Feld ZNA):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
-        <input class="input-text" type="text" name="qj" id="qj"
+    <div class="form-group">
+        <label class="form-label" for="qj"><?= htmlspecialchars(ueb('Zeitschrift / Quelle (Feld ZNA):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="text" name="qj" id="qj"
                value="<?= htmlspecialchars($qj, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     </div>
 
-    <div style="margin-top: 8px;">
-        <label class="field-label" for="qp"><?= htmlspecialchars(ueb('Person(en) / Verfasser (Feld VER/@VER):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
-        <input class="input-text" type="text" name="qp" id="qp"
+    <div class="form-group">
+        <label class="form-label" for="qp"><?= htmlspecialchars(ueb('Person(en) / Verfasser (Feld VER/@VER):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="text" name="qp" id="qp"
                value="<?= htmlspecialchars($qp, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     </div>
 
-    <p class="muted" style="margin-top: 6px;">
+    <p class="status-muted" style="margin-top: 8px;">
         Bool-Syntax pro Feld: Begriffe können mit <code>AND</code>, <code>OR</code>, <code>NOT</code> kombiniert werden
         (keine Klammern, Auswertung von links nach rechts).
     </p>
 
-    <div style="margin-top: 16px;">
+    <div style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
         <button type="submit" class="btn btn-primary">
             <?= htmlspecialchars(ueb('Suchen'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         </button>
         <a class="btn" href="mlogin.php?action=logout"><?= htmlspecialchars(ueb('Logout'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
     </div>
 </form>
+</div>
 
 <?php
 render_footer();
-

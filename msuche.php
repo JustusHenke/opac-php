@@ -25,7 +25,7 @@ render_header($HTML_TITLE);
 render_app_header(ueb('Trefferliste'));
 
 if (!$hasAny): ?>
-    <p class="error">
+    <p class="status-error">
         <?= htmlspecialchars(ueb('Es wurde kein Suchkriterium eingegeben.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
     </p>
 <?php
@@ -34,7 +34,7 @@ if (!$hasAny): ?>
 endif;
 
 if (!is_readable($PDOK_PDK)): ?>
-    <p class="error">
+    <p class="status-error">
         <?= htmlspecialchars(ueb('Die Datei mit den Dokumentdaten (pdok.pdk) konnte nicht gefunden oder gelesen werden.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
     </p>
 <?php
@@ -193,35 +193,37 @@ $count = count($results);
 log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
 ?>
 
-<p>
-    <?= htmlspecialchars(ueb('Suchkriterien:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?><br>
-    <?php if ($q !== ''): ?>
-        <span class="muted"><?= htmlspecialchars(ueb('Freitext:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
-        <strong><?= htmlspecialchars($q, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
-    <?php endif; ?>
-    <?php if ($qt !== ''): ?>
-        <span class="muted"><?= htmlspecialchars(ueb('Titel:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
-        <strong><?= htmlspecialchars($qt, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
-    <?php endif; ?>
-    <?php if ($qa !== ''): ?>
-        <span class="muted"><?= htmlspecialchars(ueb('Zusammenfassung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
-        <strong><?= htmlspecialchars($qa, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
-    <?php endif; ?>
-    <?php if ($qj !== ''): ?>
-        <span class="muted"><?= htmlspecialchars(ueb('Zeitschrift:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
-        <strong><?= htmlspecialchars($qj, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
-    <?php endif; ?>
-    <?php if ($qp !== ''): ?>
-        <span class="muted"><?= htmlspecialchars(ueb('Person(en):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
-        <strong><?= htmlspecialchars($qp, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
-    <?php endif; ?>
+<div class="search-box" style="margin-bottom: 20px;">
+    <p style="margin-bottom: 8px;">
+        <?= htmlspecialchars(ueb('Suchkriterien:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?><br>
+        <?php if ($q !== ''): ?>
+            <span class="muted"><?= htmlspecialchars(ueb('Freitext:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+            <strong><?= htmlspecialchars($q, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
+        <?php endif; ?>
+        <?php if ($qt !== ''): ?>
+            <span class="muted"><?= htmlspecialchars(ueb('Titel:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+            <strong><?= htmlspecialchars($qt, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
+        <?php endif; ?>
+        <?php if ($qa !== ''): ?>
+            <span class="muted"><?= htmlspecialchars(ueb('Zusammenfassung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+            <strong><?= htmlspecialchars($qa, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
+        <?php endif; ?>
+        <?php if ($qj !== ''): ?>
+            <span class="muted"><?= htmlspecialchars(ueb('Zeitschrift:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+            <strong><?= htmlspecialchars($qj, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
+        <?php endif; ?>
+        <?php if ($qp !== ''): ?>
+            <span class="muted"><?= htmlspecialchars(ueb('Person(en):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+            <strong><?= htmlspecialchars($qp, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
+        <?php endif; ?>
 
-    <?= htmlspecialchars(ueb('Trefferanzahl:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
-    <strong><?= (int)$count ?></strong>
-</p>
+        <?= htmlspecialchars(ueb('Trefferanzahl:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+        <strong><?= (int)$count ?></strong>
+    </p>
+</div>
 
 <?php if ($count === 0): ?>
-    <p class="muted">
+    <p class="status-muted">
         <?= htmlspecialchars(ueb('Es wurden keine Dokumente zu dieser Anfrage gefunden.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
     </p>
 <?php else: ?>
@@ -231,42 +233,51 @@ log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
     $userData = new UserData($DATA_DIR);
     $username = $_SESSION['username'] ?? 'guest';
     $isGuest = ($_SESSION['userid'] ?? '') === 'guest';
-
-    foreach ($results as $idx => $res):
+    ?>
+    <div class="result-list">
+    <?php foreach ($results as $idx => $res):
         $line = (int)$res['line'];
         $inCart = in_array($line, $cart, true);
         $hasNote = !$isGuest && $userData->getNote($username, $line) !== null;
         ?>
-        <div class="search-result">
-            <div class="search-result-title">
-                <?= (int)($idx + 1) ?>.
+        <div class="result-card">
+            <div class="result-title">
+                <span class="result-number"><?= (int)($idx + 1) ?>.</span>
                 <?= htmlspecialchars($res['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
             </div>
-            <div class="muted">
-                <?= htmlspecialchars(ueb('Line:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?> <?= $line ?>
-                &nbsp;|&nbsp;
+            <div class="result-meta">
+                <span><?= htmlspecialchars(ueb('Line:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?> <?= $line ?></span>
+            </div>
+            <div class="result-actions">
                 <?php if ($inCart): ?>
                     <a href="mtools.php?action=cart_remove&amp;line=<?= $line ?>" 
                        onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_remove', this)" 
-                       style="color:#d9534f;"><?= htmlspecialchars(ueb('aus Warenkorb entfernen'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
+                       class="btn btn-sm" style="color:var(--accent-red);">
+                        <?= htmlspecialchars(ueb('aus Warenkorb entfernen'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+                    </a>
                 <?php else: ?>
                     <a href="mtools.php?action=cart_add&amp;line=<?= $line ?>" 
-                       onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_add', this)"><?= htmlspecialchars(ueb('in Warenkorb'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
+                       onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_add', this)" 
+                       class="btn btn-sm">
+                        <?= htmlspecialchars(ueb('in Warenkorb'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+                    </a>
                 <?php endif; ?>
-                &nbsp;|&nbsp;
                 <?php if (!$isGuest): ?>
-                <a href="mnote.php?line=<?= $line ?>"><?= htmlspecialchars(ueb('Notiz'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
-                <span id="note-star-<?= $line ?>" style="color:var(--primary); <?= $hasNote ? '' : 'display:none;' ?>">★</span>
+                    <a href="mnote.php?line=<?= $line ?>" class="btn btn-sm">
+                        <?= htmlspecialchars(ueb('Notiz'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+                    </a>
+                    <span id="note-star-<?= $line ?>" style="color:var(--primary); <?= $hasNote ? '' : 'display:none;' ?>">★</span>
                 <?php endif; ?>
             </div>
-            <div style="margin-top:4px;">
+            <div>
                 <?= $res['html'] ?>
             </div>
         </div>
     <?php endforeach; ?>
+    </div>
 <?php endif; ?>
 
-<p style="margin-top:16px;">
+<p style="margin-top:24px; display: flex; gap: 12px; flex-wrap: wrap;">
     <a class="btn" href="maske.php"><?= htmlspecialchars(ueb('Zurück zur Suchmaske'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
     <a class="btn" href="mtools.php?action=cart_view"><?= htmlspecialchars(ueb('Warenkorb anzeigen'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
     <a class="btn" href="mlogin.php?action=logout"><?= htmlspecialchars(ueb('Logout'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
@@ -274,4 +285,3 @@ log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
 
 <?php
 render_footer();
-
