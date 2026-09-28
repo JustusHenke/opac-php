@@ -71,8 +71,9 @@ foreach ($fieldMap as $key => $val) {
     }
 }
 
-// MIDOS-Fallback: Wenn keine Felder gesetzt sind, aber Freitext 'q' -> sequenzieller Scan
-$useSequential = (!$isBib && $candidateIds === null && $q !== '');
+// MIDOS-Fallback: Wenn kein Indexfeld gesetzt ist, aber Freitext 'q' oder
+// Abstract 'qa' (nur im sequenziellen Scan pruefbar) -> sequenzieller Scan
+$useSequential = (!$isBib && $candidateIds === null && ($q !== '' || $qa !== ''));
 
 $results = [];
 $maxResults = 1000;
