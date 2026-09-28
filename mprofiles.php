@@ -7,7 +7,7 @@ require_once __DIR__ . '/UserData.php';
 require_once __DIR__ . '/MidosIndex.php';
 
 $username = $_SESSION['username'];
-$userData = new UserData($DATA_DIR);
+$userData = new UserData($USER_DATA_DIR);
 $lib = get_opac_library();
 
 $action = req('action', 'list');

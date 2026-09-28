@@ -16,6 +16,17 @@ $PDOK_PDK = $DATA_DIR . DIRECTORY_SEPARATOR . "pdok.pdk";
 $BIB_DIR =
     $BASE_DIR . DIRECTORY_SEPARATOR . "data" . DIRECTORY_SEPARATOR . "bib";
 
+// Nutzerdaten (Konten, Notizen, Profile) sind datenquellenunabhängig und
+// liegen direkt unter data/ – nicht mehr im MIDOS-Ordner.
+$USER_DATA_DIR = $BASE_DIR . DIRECTORY_SEPARATOR . "data";
+
+// Einmalige Migration: alte Lage data/midos/user_data.db nach data/ verschieben
+$legacyUserDb = $DATA_DIR . DIRECTORY_SEPARATOR . "user_data.db";
+$userDb = $USER_DATA_DIR . DIRECTORY_SEPARATOR . "user_data.db";
+if (is_file($legacyUserDb) && !is_file($userDb)) {
+    @rename($legacyUserDb, $userDb);
+}
+
 // .env im Projekt-Root einlesen (Vorlage: .env.example). Format: KEY=VALUE je
 // Zeile, optional in Anführungszeichen; # = Kommentar. Echte Umgebungsvariablen
 // haben Vorrang (existierende Keys werden nicht überschrieben). Die Datei ist
@@ -439,8 +450,8 @@ function ueb(string $text): string
 function authenticate(string $username, string $password): ?array
 {
     require_once __DIR__ . "/UserData.php";
-    global $DATA_DIR;
-    $userData = new UserData($DATA_DIR);
+    global $DATA_DIR, $USER_DATA_DIR;
+    $userData = new UserData($USER_DATA_DIR);
     $user = $userData->authenticateUser($username, $password);
 
     if ($user) {

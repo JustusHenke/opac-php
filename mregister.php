@@ -22,7 +22,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!preg_match('/^[a-zA-Z0-9_\-]+$/', $username)) {
         $error = ueb('Der Benutzername enthält ungültige Zeichen (nur Buchstaben, Zahlen, _ und - erlaubt).');
     } else {
-        $userData = new UserData($DATA_DIR);
+        $userData = new UserData($USER_DATA_DIR);
         if ($userData->userExists($username)) {
             $error = ueb('Dieser Benutzername ist bereits vergeben.');
         } else {

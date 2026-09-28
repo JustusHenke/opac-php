@@ -179,7 +179,7 @@ log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp . ' ' . $qy),
     <?php
     $cart = $_SESSION['cart'] ?? [];
     require_once __DIR__ . '/UserData.php';
-    $userData = new UserData($DATA_DIR);
+    $userData = new UserData($USER_DATA_DIR);
     $username = $_SESSION['username'] ?? 'guest';
     $isGuest = ($_SESSION['userid'] ?? '') === 'guest';
     ?>

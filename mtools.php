@@ -191,7 +191,7 @@ if ($cart === []): ?>
                     <a href="mnote.php?line=<?= (int)$ln ?>" class="btn btn-sm"><?= htmlspecialchars(ueb('Notiz bearbeiten'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></a>
                     <?php
                         require_once __DIR__ . '/UserData.php';
-                        $userData = new UserData($DATA_DIR);
+                        $userData = new UserData($USER_DATA_DIR);
                         if ($userData->getNote($_SESSION['username'], (int)$ln)) {
                             echo ' <span style="color:var(--primary);">★</span>';
                         }

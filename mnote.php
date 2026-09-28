@@ -12,7 +12,7 @@ if ($docId <= 0 || ($_SESSION['userid'] ?? '') === 'guest') {
     redirect('msuche.php');
 }
 
-$userData = new UserData($DATA_DIR);
+$userData = new UserData($USER_DATA_DIR);
 $lib = get_opac_library();
 
 $action = req('action', 'view');
