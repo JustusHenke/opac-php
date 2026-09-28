@@ -10,7 +10,7 @@ declare(strict_types=1);
  * - Search uses binary search on the text file (seek to middle, skip partial line)
  * - .pvw files contain lists of document IDs at the specified offset
  */
-class MidosIndex
+class MidosIndex implements OpacLibrary
 {
     private string $dataDir;
     private ?PDO $db = null;
@@ -48,7 +48,7 @@ class MidosIndex
 
     public function search(string $term, int $indexNum): array
     {
-        $field = $this->mapIndexNumToField($indexNum);
+        $field = $this->resolveIndex($indexNum);
         $term = $this->normalize($term);
 
         $db = $this->getDb();
@@ -60,7 +60,7 @@ class MidosIndex
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
-    public function searchBoolean(string $query, int $indexNum): array
+    public function searchBoolean(string $query, int|string $indexNum): array
     {
         preg_match_all('/"(?:\\\\.|[^\\\\"])*"|\S+/', trim($query), $matches);
         $tokens = $matches[0] ?? [];
@@ -100,9 +100,9 @@ class MidosIndex
         return $result ?? [];
     }
 
-    public function getTerms(int $indexNum, string $prefix, int $limit = 100): array
+    public function getTerms(int|string $indexNum, string $prefix, int $limit = 100): array
     {
-        $field = $this->mapIndexNumToField($indexNum);
+        $field = $this->resolveIndex($indexNum);
         $prefix = $this->normalize($prefix);
         
         $db = $this->getDb();
@@ -117,18 +117,18 @@ class MidosIndex
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function getTermCount(int $indexNum): int
+    public function getTermCount(int|string $indexNum): int
     {
-        $field = $this->mapIndexNumToField($indexNum);
+        $field = $this->resolveIndex($indexNum);
         $db = $this->getDb();
         $stmt = $db->prepare("SELECT COUNT(DISTINCT term) FROM search_index WHERE field = ?");
         $stmt->execute([$field]);
         return (int)$stmt->fetchColumn();
     }
 
-    public function getTermsByOffset(int $indexNum, int $offset, int $limit = 50): array
+    public function getTermsByOffset(int|string $indexNum, int $offset, int $limit = 50): array
     {
-        $field = $this->mapIndexNumToField($indexNum);
+        $field = $this->resolveIndex($indexNum);
         $db = $this->getDb();
         $stmt = $db->prepare("SELECT MIN(display_term) as term, COUNT(DISTINCT doc_id) as count 
                                     FROM search_index 
@@ -140,7 +140,53 @@ class MidosIndex
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function getRecord(int $docId): ?string
+    public function getRecord(int $docId): ?array
+    {
+        $raw = $this->readRawRecord($docId);
+        if ($raw === null) return null;
+        return $this->toOpacRecord($docId, $raw, true);
+    }
+
+    public function getRecordLight(int $docId): ?array
+    {
+        $raw = $this->readRawRecord($docId);
+        if ($raw === null) return null;
+        return $this->toOpacRecord($docId, $raw, false);
+    }
+
+    public function iterateLight(): Traversable
+    {
+        $pdkFile = $this->dataDir . DIRECTORY_SEPARATOR . 'pdok.pdk';
+        if (!file_exists($pdkFile)) return;
+        $fp = fopen($pdkFile, 'r');
+        if (!$fp) return;
+        $docId = 0;
+        while (($line = fgets($fp)) !== false) {
+            $docId++;
+            if (trim($line) === '') continue;
+            $utf8 = mb_convert_encoding(rtrim($line), 'UTF-8', 'ISO-8859-1');
+            $fields = parse_pdok_fields($utf8);
+            yield [
+                'id' => $docId,
+                'title' => $fields['HST'] ?? ($fields['TI'] ?? ($fields['T'] ?? '(ohne Titel)')),
+                'alltext' => $utf8,
+                'abstract' => $fields['ABS'] ?? ($fields['ZUS'] ?? ''),
+            ];
+        }
+        fclose($fp);
+    }
+
+    public function countRecords(): int
+    {
+        try {
+            $db = $this->getDb();
+            return (int)$db->query('SELECT COUNT(*) FROM doc_offsets')->fetchColumn();
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
+    private function readRawRecord(int $docId): ?string
     {
         if ($docId < 1) return null;
         $pdkFile = $this->dataDir . DIRECTORY_SEPARATOR . 'pdok.pdk';
@@ -161,6 +207,50 @@ class MidosIndex
         return $line !== false ? rtrim($line) : null;
     }
 
+    /** MIDOS-Rohtext -> normalisiertes Opac-Record (identischer Vertrag wie BibLibrary::getRecord). */
+    private function toOpacRecord(int $docId, string $rawUtf8, bool $withHtml): array
+    {
+        $fields = parse_pdok_fields($rawUtf8);
+        $fmt = $withHtml ? format_pdok_record($rawUtf8) : ['title' => ($fields['HST'] ?? ($fields['TI'] ?? '(ohne Titel)')), 'html' => ''];
+
+        return [
+            'id' => $docId,
+            'source' => 'midos',
+            'citekey' => (string)($fields['INN'] ?? ('m' . $docId)),
+            'entry_type' => (string)($fields['DTY'] ?? ''),
+            'type_label' => (string)($fields['DTY'] ?? 'MIDOS'),
+            'title' => $fmt['title'],
+            'subtitle' => (string)($fields['ZUS'] ?? ''),
+            'authors' => array_values(array_filter(array_map('trim', explode('|', $fields['VER'] ?? '')))),
+            'editors' => [],
+            'journal' => (string)($fields['ZNA'] ?? ''),
+            'year' => (string)($fields['ERJ'] ?? ($fields['JA'] ?? '')),
+            'volume' => (string)($fields['ZJG'] ?? ''),
+            'issue' => (string)($fields['ZHE'] ?? ''),
+            'pages' => (string)($fields['KOL'] ?? ''),
+            'publisher' => '',
+            'location' => (string)($fields['ORT'] ?? ''),
+            'url' => (string)($fields['URL'] ?? ''),
+            'doi' => '',
+            'isbn_issn' => (string)($fields['ISSN'] ?? ($fields['ISBN'] ?? '')),
+            'language' => (string)($fields['LAN'] ?? ''),
+            'abstract' => (string)($fields['ABS'] ?? ($fields['ZUS'] ?? '')),
+            'keywords' => array_values(array_filter(array_map('trim', explode('|', ($fields['SW'] ?? '') . '|' . ($fields['OSW'] ?? '') . '|' . ($fields['FISSW'] ?? ''))))),
+            'fields' => $fields,
+            'alltext' => $rawUtf8,
+            'html' => $fmt['html'],
+        ];
+    }
+
+
+    private function resolveIndex(int|string $index): string
+    {
+        if (is_string($index)) $index = match($index) {
+            'qp' => 1, 'qt' => 2, 'qs' => 4, 'qj' => 6, 'qy' => 7,
+            default => 0,
+        };
+        return $this->mapIndexNumToField($index);
+    }
 
     private function mapIndexNumToField(int $num): string
     {

@@ -1,5 +1,5 @@
 # Zugriff auf sensible Daten einschränken
-<FilesMatch "\.(dat|db|log|pdk|pd2|sav.*)$">
+<FilesMatch "\.(dat|db|log|pdk|pd2|bib|lock|sav.*)$">
     <IfModule mod_authz_core.c>
         Require all denied
     </IfModule>

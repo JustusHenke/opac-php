@@ -6,10 +6,10 @@ check_auth();
 
 global $PDOK_PDK, $DATA_DIR;
 
-// Initialisierung Index-Klasse
+// Datenquelle (BibTeX-Bestand oder MIDOS-Rückfallposition)
 require_once __DIR__ . '/MidosIndex.php';
-$indexDir = dirname($PDOK_PDK);
-$midosIndex = new MidosIndex($indexDir);
+$lib  = get_opac_library();
+$isBib = $lib instanceof BibLibrary;
 
 // Suchparameter
 $q  = req('q', '');
@@ -18,8 +18,9 @@ $qa = req('qa', '');
 $qj = req('qj', '');
 $qp = req('qp', '');
 $qs = req('qs', '');
+$qy = req('qy', '');
 
-$hasAny = ($q !== '' || $qt !== '' || $qa !== '' || $qj !== '' || $qp !== '' || $qs !== '');
+$hasAny = ($q !== '' || $qt !== '' || $qa !== '' || $qj !== '' || $qp !== '' || $qs !== '' || $qy !== '');
 
 render_header($HTML_TITLE);
 render_app_header(ueb('Trefferliste'));
@@ -33,7 +34,7 @@ if (!$hasAny): ?>
     exit;
 endif;
 
-if (!is_readable($PDOK_PDK)): ?>
+if (!$isBib && !is_readable($PDOK_PDK)): ?>
     <p class="status-error">
         <?= htmlspecialchars(ueb('Die Datei mit den Dokumentdaten (pdok.pdk) konnte nicht gefunden oder gelesen werden.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
     </p>
@@ -42,155 +43,94 @@ if (!is_readable($PDOK_PDK)): ?>
     exit;
 endif;
 
-// Index-basierte Suche
+// Feld-basierte Index-Suche
+// BibLibrary: Feldnamen; MidosIndex: Legacy-Indexnummern (1=Person, 2=Titel, 4=Schlagwort, 6=Zeitschrift, 7=Jahr)
+$fieldMap = $isBib
+    ? ['qt' => $qt, 'qp' => $qp, 'qj' => $qj, 'qs' => $qs, 'qa' => $qa, 'qy' => $qy, 'q' => $q]
+    : ['qt' => 2, 'qp' => 1, 'qj' => 6, 'qs' => 4, 'qy' => 7];
+
 $candidateIds = null;
-$useIndex = true;
+foreach ($fieldMap as $key => $val) {
+    if ($val === '') {
+        continue;
+    }
+    $ids = $lib->searchBoolean((string) $val, $key);
 
-// 1. Index-Abfragen für spezifische Felder
-// Mapping: qt->2 (Titel), qp->1 (Person), qj->6 (Zeitschrift), qa->18 (Abstract)
-$fieldMap = [
-    'qt' => ['val' => $qt, 'idx' => 2],
-    'qp' => ['val' => $qp, 'idx' => 1],
-    'qj' => ['val' => $qj, 'idx' => 6],
-    'qs' => ['val' => $qs, 'idx' => 4],
-];
-
-foreach ($fieldMap as $key => $info) {
-    if ($info['val'] !== '') {
-        $ids = $midosIndex->searchBoolean($info['val'], $info['idx']);
-        
-        // Wenn ein Feld gesetzt ist, aber der Index nichts liefert -> 0 Treffer
-        if (empty($ids)) {
-            $candidateIds = [];
+    // Feld gesetzt, aber keine Treffer -> Gesamtergebnis leer
+    if (empty($ids)) {
+        $candidateIds = [];
+        break;
+    }
+    if ($candidateIds === null) {
+        $candidateIds = $ids;
+    } else {
+        $candidateIds = array_intersect($candidateIds, $ids);
+        if ($candidateIds === []) {
             break;
-        }
-
-        if ($candidateIds === null) {
-            $candidateIds = $ids;
-        } else {
-            $candidateIds = array_intersect($candidateIds, $ids);
-            if (empty($candidateIds)) {
-                break;
-            }
         }
     }
 }
 
-// Wenn nur 'q' (Freitext) gesetzt ist und keine Feldsuche -> Sequenziell (oder später Index 5)
-// Aktuell: Fallback auf Sequenziell für 'q', wenn candidateIds null ist
-if ($candidateIds === null && $q !== '') {
-    $useIndex = false; // Full Scan nötig
-}
+// MIDOS-Fallback: Wenn keine Felder gesetzt sind, aber Freitext 'q' -> sequenzieller Scan
+$useSequential = (!$isBib && $candidateIds === null && $q !== '');
 
 $results = [];
 $maxResults = 1000;
 
-if ($useIndex && $candidateIds !== null) {
-    // A. Index-basierter Zugriff
-    // candidateIds enthält die Dokument-IDs (Zeilennummern).
-    // Falls 'q' gesetzt ist, müssen wir diese Kandidaten noch gegen 'q' prüfen.
-    
-    // Sortieren für sequenziellen Zugriff (performance opt)
-    sort($candidateIds, SORT_NUMERIC);
-    
-    foreach ($candidateIds as $docId) {
-        if (count($results) >= $maxResults) break;
-
-        $raw = $midosIndex->getRecord($docId);
-        if ($raw === null) continue;
-
-        // Encoding fix: Data is ISO-8859-1, convert to UTF-8
-        $raw = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
-
-        // Falls 'q' gesetzt ist, Prüfen
-        if ($q !== '') {
-            if (!matches_bool($raw, $q)) {
-                continue;
-            }
-        }
-
-        $rec = format_pdok_record($raw);
-        $results[] = [
-            'line'  => $docId,
-            'title' => $rec['title'],
-            'html'  => $rec['html'],
-        ];
-    }
-} else {
-    // B. Sequenzielle Suche (Legacy Fallback)
-    // Entweder nur 'q' gesucht, oder Index-Dateien fehlen / Fehler
-    
+if ($useSequential) {
+    // Sequenzielle Suche (Legacy): Freitext + Feldprüfung über die Rohtexte
     $fp = fopen($PDOK_PDK, 'r');
     if ($fp) {
         $lineNumber = 0;
         while (($raw = fgets($fp)) !== false) {
             $lineNumber++;
             if (trim($raw) === '') continue;
-
-            // Encoding fix: Data is ISO-8859-1, convert to UTF-8
-            $raw = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
-
+            $utf8 = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
+            if (!matches_bool($utf8, $q)) {
+                continue;
+            }
+            $fields = ($qt !== '' || $qa !== '' || $qj !== '' || $qp !== '')
+                ? parse_pdok_fields($utf8)
+                : [];
             $match = true;
-
-            // Freitext über gesamten Datensatz
-            if ($q !== '') {
-                $match = $match && matches_bool($raw, $q);
+            if ($match && $qt !== '') {
+                $match = matches_bool(($fields['T'] ?? '') . ' ' . ($fields['TI'] ?? ''), $qt);
             }
-
-            // Falls wir hier landen, obwohl Felder gesetzt waren (z.B. Index Init Fehler),
-            // müssen wir auch die Felder prüfen!
-            // Da wir oben $useIndex auf false setzen nur wenn candidateIds null war (also keine Felder),
-            // sollte das hier nur für q-only passieren.
-            // ABER: Falls Index-Klasse leere Ergebnisse lieferte weil Dateien fehlten?
-            // MidosIndex::search gibt [] zurück wenn Dateien fehlen.
-            // Das würde als "0 Treffer" interpretiert werden!
-            // TODO: MidosIndex sollte signalisieren, ob Index existiert.
-            // Workaround: Wir vertrauen darauf, dass Indices da sind wenn wir hier sind.
-            // Für q-only Suche:
-            
-            if ($match) {
-                // Felder Check (Fallback für q-only, Felder sollten leer sein)
-                $fields = ($qt !== '' || $qa !== '' || $qj !== '' || $qp !== '') 
-                    ? parse_pdok_fields($raw) 
-                    : [];
-
-                if ($match && $qt !== '') {
-                    $titleField = ($fields['T'] ?? '') . ' ' . ($fields['TI'] ?? '');
-                    $match = matches_bool($titleField, $qt);
-                }
-                if ($match && $qa !== '') {
-                    $absField = ($fields['ABS'] ?? '') . ' ' . ($fields['ZUS'] ?? '');
-                    $match = matches_bool($absField, $qa);
-                }
-                if ($match && $qj !== '') {
-                    $znaField = $fields['ZNA'] ?? '';
-                    $match = matches_bool($znaField, $qj);
-                }
-                if ($match && $qp !== '') {
-                    $verField = ($fields['VER'] ?? '');
-                    $verAll = $verField . ' ' . $raw;
-                    $match = matches_bool($verAll, $qp);
-                }
+            if ($match && $qa !== '') {
+                $match = matches_bool(($fields['ABS'] ?? '') . ' ' . ($fields['ZUS'] ?? ''), $qa);
             }
-
+            if ($match && $qj !== '') {
+                $match = matches_bool($fields['ZNA'] ?? '', $qj);
+            }
+            if ($match && $qp !== '') {
+                $match = matches_bool(($fields['VER'] ?? '') . ' ' . $utf8, $qp);
+            }
             if ($match) {
-                $rec = format_pdok_record($raw);
-                $results[] = [
-                    'line'  => $lineNumber, // 1-based, fgets starts at 1? No, counter starts at 1
-                    'title' => $rec['title'],
-                    'html'  => $rec['html'],
-                ];
+                $rec = $lib->getRecord($lineNumber);
+                if ($rec !== null) {
+                    $results[] = ['line' => $lineNumber, 'title' => $rec['title'], 'html' => $rec['html']];
+                }
                 if (count($results) >= $maxResults) break;
             }
         }
         fclose($fp);
+    }
+} else {
+    // Index-basierter Zugriff
+    $candidateIds = $candidateIds ?? [];
+    sort($candidateIds, SORT_NUMERIC);
+    foreach ($candidateIds as $docId) {
+        if (count($results) >= $maxResults) break;
+        $rec = $lib->getRecord((int) $docId);
+        if ($rec === null) continue;
+        $results[] = ['line' => (int) $docId, 'title' => $rec['title'], 'html' => $rec['html']];
     }
 }
 
 $count = count($results);
 
 // Statistik
-log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
+log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp . ' ' . $qy), $count);
 ?>
 
 <div class="search-box" style="margin-bottom: 20px;">
@@ -215,6 +155,14 @@ log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
         <?php if ($qp !== ''): ?>
             <span class="muted"><?= htmlspecialchars(ueb('Person(en):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
             <strong><?= htmlspecialchars($qp, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
+        <?php endif; ?>
+        <?php if ($qs !== ''): ?>
+            <span class="muted"><?= htmlspecialchars(ueb('Schlagwort:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+            <strong><?= htmlspecialchars($qs, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
+        <?php endif; ?>
+        <?php if ($qy !== ''): ?>
+            <span class="muted"><?= htmlspecialchars(ueb('Jahr:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></span>
+            <strong><?= htmlspecialchars($qy, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong><br>
         <?php endif; ?>
 
         <?= htmlspecialchars(ueb('Trefferanzahl:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
@@ -246,18 +194,21 @@ log_search(trim($q . ' ' . $qt . ' ' . $qa . ' ' . $qj . ' ' . $qp), $count);
                 <?= htmlspecialchars($res['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
             </div>
             <div class="result-meta">
-                <span><?= htmlspecialchars(ueb('Line:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?> <?= $line ?></span>
+                <span><?= htmlspecialchars(ueb('Datensatz-ID:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?> <?= $line ?></span>
+                <?php if ($isBib): ?>
+                    <span class="badge">BibTeX</span>
+                <?php endif; ?>
             </div>
             <div class="result-actions">
                 <?php if ($inCart): ?>
-                    <a href="mtools.php?action=cart_remove&amp;line=<?= $line ?>" 
-                       onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_remove', this)" 
+                    <a href="mtools.php?action=cart_remove&amp;line=<?= $line ?>"
+                       onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_remove', this)"
                        class="btn btn-sm" style="color:var(--accent-red);">
                         <?= htmlspecialchars(ueb('aus Warenkorb entfernen'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
                     </a>
                 <?php else: ?>
-                    <a href="mtools.php?action=cart_add&amp;line=<?= $line ?>" 
-                       onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_add', this)" 
+                    <a href="mtools.php?action=cart_add&amp;line=<?= $line ?>"
+                       onclick="event.preventDefault(); toggleCart(<?= $line ?>, 'cart_add', this)"
                        class="btn btn-sm">
                         <?= htmlspecialchars(ueb('in Warenkorb'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
                     </a>

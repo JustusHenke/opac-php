@@ -10,6 +10,65 @@ $DATA_DIR =
 
 // Datenquellen (nur noch aus data/)
 $PDOK_PDK = $DATA_DIR . DIRECTORY_SEPARATOR . "pdok.pdk";
+
+// Neuer Bestand: BibTeX-Dateien unter data/bib/. Die NEUESTE .bib-Datei bildet
+// den Vollbestand ab (Quelle der Wahrheit).
+$BIB_DIR =
+    $BASE_DIR . DIRECTORY_SEPARATOR . "data" . DIRECTORY_SEPARATOR . "bib";
+
+// .env im Projekt-Root einlesen (Vorlage: .env.example). Format: KEY=VALUE je
+// Zeile, optional in Anführungszeichen; # = Kommentar. Echte Umgebungsvariablen
+// haben Vorrang (existierende Keys werden nicht überschrieben). Die Datei ist
+// über die Root-.htaccess vor Web-Zugriff geschützt und gitignored.
+$envFile = $BASE_DIR . DIRECTORY_SEPARATOR . ".env";
+if (is_file($envFile)) {
+    $envLines = @file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (is_array($envLines)) {
+        foreach ($envLines as $envLine) {
+            $envLine = trim($envLine);
+            if ($envLine === "" || $envLine[0] === "#") {
+                continue;
+            }
+            $eq = strpos($envLine, "=");
+            if ($eq === false) {
+                continue;
+            }
+            $envKey = trim(substr($envLine, 0, $eq));
+            $envVal = trim(substr($envLine, $eq + 1));
+            $len = strlen($envVal);
+            if ($len >= 2
+                && (($envVal[0] === '"' && $envVal[$len - 1] === '"')
+                    || ($envVal[0] === "'" && $envVal[$len - 1] === "'"))) {
+                $envVal = substr($envVal, 1, -1);
+            }
+            if ($envKey !== "" && getenv($envKey) === false) {
+                if (function_exists("putenv")) {
+                    @putenv($envKey . "=" . $envVal);
+                }
+                $_ENV[$envKey] = $envVal;
+            }
+        }
+    }
+    unset($envFile, $envLines, $envLine, $eq, $envKey, $envVal, $len);
+}
+
+/**
+ * Aktive Datenquelle des OPAC:
+ *  - 'bibtex': Bestand = neueste .bib-Datei unter data/bib (Standard, MIDOS wird
+ *    nicht mehr weitergegeben)
+ *  - 'midos' : Bestand = data/midos/pdok.pdk (Rückfallposition / Archivmodus)
+ */
+$DATA_SOURCE = "bibtex";
+
+/**
+ * Admin-Secret für Bestandsimport-Aktionen (mimport.php). Es gibt kein
+ * Admin-Rollenkonzept – stattdessen muss bei jeder Import-Aktion das Secret
+ * mitgeliefert werden (Formularfeld, nur POST).
+ * Empfohlen: Datei .env im Projekt-Root (OPAC_ADMIN_SECRET=..., Vorlage
+ * .env.example). Reihenfolge: Umgebungsvariable/.env -> Wert hier (Fallback).
+ * Leeres Secret (alle Quellen) => Import-Aktionen deaktiviert (fail-closed).
+ */
+$OPAC_ADMIN_SECRET = "";
 /**
  * Hilfsfunktion: einfache Bool-Tokenisierung (AND/OR/NOT, keine Klammern).
  */
@@ -108,6 +167,38 @@ function check_auth(): void
         header("Location: mlogin.php");
         exit();
     }
+}
+
+/**
+ * Liefert das effektive Admin-Secret. Reihenfolge:
+ * 1. Umgebungsvariable OPAC_ADMIN_SECRET (inkl. Werten aus .env, das beim
+ *    Start von config.php eingelesen wird)
+ * 2. Fallback: $OPAC_ADMIN_SECRET aus config.php
+ */
+function opac_admin_secret(): string
+{
+    global $OPAC_ADMIN_SECRET;
+    $secret = (string) (getenv("OPAC_ADMIN_SECRET") ?: "");
+    if ($secret === "" && isset($_ENV["OPAC_ADMIN_SECRET"])) {
+        $secret = (string) $_ENV["OPAC_ADMIN_SECRET"];
+    }
+    if ($secret === "") {
+        $secret = (string) ($OPAC_ADMIN_SECRET ?? "");
+    }
+    return $secret;
+}
+
+/**
+ * Prüft das mitgelieferte Admin-Secret (timing-sicher via hash_equals,
+ * fail-closed): leerer konfigurierter Secret-Wert => false (Import deaktiviert).
+ */
+function check_admin_secret(?string $input): bool
+{
+    $secret = opac_admin_secret();
+    if ($secret === "" || $input === null || $input === "") {
+        return false;
+    }
+    return hash_equals($secret, $input);
 }
 
 /**
@@ -582,4 +673,69 @@ function log_search(string $query, int $hits): void
     $line = implode("\t", [$time, $user, $query, (string) $hits]) . "\n";
 
     @file_put_contents($file, $line, FILE_APPEND | LOCK_EX);
+}
+
+/**
+ * Vertrag für alle Bestands-Klassen (MidosIndex und BibLibrary).
+ * Beide implementieren dieselbe API, sodass Suche/Browsing/Notizen
+ * datenquellenunabhängig funktionieren.
+ */
+interface OpacLibrary
+{
+    /**
+     * Bool-Suche (AND/OR/NOT) in einem Feld.
+     * $index: Feldname ('qp','qt','qs','qj','qy','qa','q') oder Legacy-Nummer (1,2,4,6,7).
+     * Rückgabe: Liste von doc-IDs.
+     */
+    public function searchBoolean(string $query, int|string $index): array;
+
+    /** Terme eines Registers für A-Z-Browsing: [['term'=>..,'count'=>..], ...] */
+    public function getTerms(int|string $index, string $prefix, int $limit = 100): array;
+
+    public function getTermCount(int|string $index): int;
+
+    public function getTermsByOffset(int|string $index, int $offset, int $limit = 50): array;
+
+    /**
+     * Normalisierter Datensatz: id, source, title, subtitle, authors, editors,
+     * journal, year, volume, issue, pages, publisher, location, url, doi,
+     * isbn_issn, abstract, keywords, fields, alltext, html.
+     */
+    public function getRecord(int $docId): ?array;
+
+    /** Record ohne HTML-Erzeugung (für Filter): id, title, alltext, abstract, ... */
+    public function getRecordLight(int $docId): ?array;
+
+    /** Leichte Iteration über den Bestand: ['id','title','alltext','abstract'] */
+    public function iterateLight(): Traversable;
+
+    public function countRecords(): int;
+}
+
+/**
+ * Factory für den aktiven Bestand ($DATA_SOURCE).
+ */
+function get_opac_library(): OpacLibrary
+{
+    static $lib = null;
+    if ($lib !== null) {
+        return $lib;
+    }
+    global $DATA_SOURCE, $DATA_DIR, $BIB_DIR;
+    if (($DATA_SOURCE ?? "bibtex") === "bibtex") {
+        require_once __DIR__ . "/BibLibrary.php";
+        $lib = new BibLibrary($BIB_DIR);
+    } else {
+        require_once __DIR__ . "/MidosIndex.php";
+        $lib = new MidosIndex($DATA_DIR);
+    }
+    return $lib;
+}
+
+/**
+ * Datensatz anhand ID aus dem aktiven Bestand (mit HTML-Darstellung).
+ */
+function opac_record(int $id): ?array
+{
+    return get_opac_library()->getRecord($id);
 }

@@ -21,12 +21,12 @@ $indexes = [
 
 if (!array_key_exists($idx, $indexes)) $idx = 1;
 
-$midosIndex = new MidosIndex($DATA_DIR);
+$lib = get_opac_library();
 
 // Bei gesetztem Start-Parameter: Nur Terme mit diesem Präfix
 if ($start !== '') {
     // Alle Terme mit diesem Präfix holen (für Paginierung)
-    $allTermsWithPrefix = $midosIndex->getTerms($idx, $start, 999999);
+    $allTermsWithPrefix = $lib->getTerms($idx, $start, 999999);
     $totalTerms = count($allTermsWithPrefix);
     $totalPages = (int)ceil($totalTerms / $limit);
     
@@ -35,12 +35,12 @@ if ($start !== '') {
     $terms = array_slice($allTermsWithPrefix, $offset, $limit);
 } else {
     // Ohne Start-Parameter: Alle Terme
-    $totalTerms = $midosIndex->getTermCount($idx);
+    $totalTerms = $lib->getTermCount($idx);
     $totalPages = (int)ceil($totalTerms / $limit);
     
     $offset = ($page - 1) * $limit;
     if ($offset < 0) $offset = 0;
-    $terms = $midosIndex->getTermsByOffset($idx, $offset, $limit);
+    $terms = $lib->getTermsByOffset($idx, $offset, $limit);
 }
 
 render_header($HTML_TITLE);

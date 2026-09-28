@@ -25,6 +25,29 @@ Dies ist die moderne PHP-Portierung des ursprünglich Perl-basierten **MIDOS-WEB
     - **Export**: BibTeX-Unterstützung für wissenschaftliche Weiterverarbeitung.
 - **📑 Index-Browsing**: Komfortables A-Z Browsing durch Personen-, Titel- und Schlagwortregister.
 
+## 📦 Datenquelle: BibTeX (statt MIDOS)
+
+Der Bestand wird aus BibTeX-Dateien im Verzeichnis `data/bib/` aufgebaut:
+
+- Die **neueste** `.bib`-Datei (nach Änderungsdatum) bildet immer den **Vollbestand** ab.
+- Import = **Abgleich (Reconcile)**: Neue Einträge werden importiert, geänderte
+  aktualisiert (Datensatz-ID bleibt stabil), Einträge, die in der neuesten Datei
+  nicht mehr enthalten sind, werden aus dem Bestand entfernt.
+- Das Delta dient nur der Statistik und Effizienz — im Zweifel kann über
+  `mimport.php` oder CLI ein **Vollimport** erzwungen werden (`php import_bibtex.php --force`).
+- Doppelungen innerhalb der Datei werden über Fingerprints (DOI bzw. Titel+Jahr+Erstautor) erkannt.
+- Der Import läuft automatisch beim ersten Zugriff, sobald sich die neueste Datei ändert;
+  Status/Manueller Start: `mimport.php` („BibTeX-Import" auf der Suchmaske).
+- Der alte MIDOS-Pfad (`pdok.pdk`) bleibt über `$DATA_SOURCE = "midos"` in `config.php`
+  als Rückfallposition aktivierbar.
+- **Import per Admin-Secret geschützt** (es gibt kein Admin-Rollenkonzept): Secret in der
+  Datei `.env` im Projekt-Root (`OPAC_ADMIN_SECRET=...`, Vorlage `.env.example`) oder als
+  Umgebungsvariable; es muss bei jeder Import-Aktion mitgeliefert werden. Die `.env` ist
+  gitignored und per Root-`.htaccess` vor Web-Zugriff geschützt. Ohne Secret ist der Import
+  deaktiviert (fail-closed). CLI (`import_bibtex.php`) gilt als serverseitig vertrauenswürdig
+  und benötigt kein Secret.
+- Der Import ist gegen parallele Abgleiche gesichert (Sperrdatei `data/bib/sync.lock`).
+
 ## 🛠 Tech Stack
 
 - **Backend**: PHP 8.1+ (Strict Typing)

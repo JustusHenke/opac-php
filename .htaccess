@@ -1,0 +1,5 @@
+# .env und Dotfiles (z. B. .env mit dem Admin-Secret) vor direktem
+# Web-Zugriff schützen. Die Datei darf niemals über HTTP ausgeliefert werden.
+<FilesMatch "^\.env">
+    Require all denied
+</FilesMatch>

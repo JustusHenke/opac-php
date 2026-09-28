@@ -11,24 +11,14 @@ $qt = req('qt', ''); // Titel
 $qa = req('qa', ''); // Abstract / Zusammenfassung
 $qj = req('qj', ''); // Zeitschrift / Quelle
 $qp = req('qp', ''); // Personen / Verfasser
+$qy = req('qy', ''); // Erscheinungsjahr
 
-// Bestandsinformationen ermitteln
-$totalEntries = 0;
+// Bestandsinformationen ermitteln (je nach Datenquelle)
+$lib = get_opac_library();
+$totalEntries = $lib->countRecords();
 $lastUpdate = null;
-
-if (is_readable($PDOK_PDK)) {
-    // Anzahl der Einträge zählen
-    $fp = fopen($PDOK_PDK, 'r');
-    if ($fp) {
-        while (fgets($fp) !== false) {
-            $totalEntries++;
-        }
-        fclose($fp);
-    }
-    
-    // Datum der letzten Aktualisierung
-    $lastUpdate = filemtime($PDOK_PDK);
-}
+$isBibSource = $lib instanceof BibLibrary;
+$stockInfo = $isBibSource ? 'BibTeX-Bestand (data/bib)' : 'MIDOS-Bestand (data/midos)';
 
 render_header($HTML_TITLE);
 render_app_header(ueb('Suchmaske'));
@@ -39,10 +29,13 @@ render_app_header(ueb('Suchmaske'));
     <p style="margin: 0;">
         <span class="muted"><?= htmlspecialchars(ueb('Bestandsinformationen:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= htmlspecialchars(ueb('Einträge im Bestand:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
-        <?= number_format($totalEntries, 0, ',', '.') ?>,
-        <?php if ($lastUpdate): ?>
+        <?= number_format($totalEntries, 0, ',', '.') ?>
+        (<?= htmlspecialchars($stockInfo, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>)<?php if ($lastUpdate): ?>,
         <?= htmlspecialchars(ueb('Letzte Aktualisierung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= date('d.m.Y H:i', $lastUpdate) ?></span>
+        <?php else: ?></span><?php endif; ?>
+        <?php if ($isBibSource): // Import-Aktion selbst ist per Admin-Secret geschützt (mimport.php) ?>
+        &nbsp;<a href="mimport.php" class="btn btn-sm">BibTeX-Import</a>
         <?php endif; ?>
     </p>
 </div>
@@ -85,6 +78,13 @@ render_app_header(ueb('Suchmaske'));
         <label class="form-label" for="qp"><?= htmlspecialchars(ueb('Person(en) / Verfasser (Feld VER/@VER):'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
         <input class="form-input" type="text" name="qp" id="qp"
                value="<?= htmlspecialchars($qp, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
+    </div>
+
+    <div class="form-group">
+        <label class="form-label" for="qy"><?= htmlspecialchars(ueb('Erscheinungsjahr:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></label>
+        <input class="form-input" type="text" name="qy" id="qy"
+               placeholder="<?= htmlspecialchars(ueb('z. B. 2024'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>"
+               value="<?= htmlspecialchars($qy, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     </div>
 
     <p class="status-muted" style="margin-top: 8px;">

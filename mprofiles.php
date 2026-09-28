@@ -8,7 +8,7 @@ require_once __DIR__ . '/MidosIndex.php';
 
 $username = $_SESSION['username'];
 $userData = new UserData($DATA_DIR);
-$midosIndex = new MidosIndex($DATA_DIR);
+$lib = get_opac_library();
 
 $action = req('action', 'list');
 $profileId = (int)req('id', '0');
@@ -46,10 +46,8 @@ if ($action === 'view' && $profileId > 0):
         <p class="status-muted" style="margin-bottom: 20px;"><?= count($items) ?> <?= ueb('Dokumente') ?></p>
         
         <?php foreach ($items as $ln): 
-            $raw = $midosIndex->getRecord((int)$ln);
-            if (!$raw) continue;
-            $raw = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
-            $rec = format_pdok_record($raw);
+            $rec = $lib->getRecord((int)$ln);
+            if (!$rec) continue;
             ?>
             <div class="result-card">
                 <div class="result-title"><?= (int)$ln ?>. <?= htmlspecialchars($rec['title']) ?></div>

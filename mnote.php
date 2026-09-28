@@ -13,7 +13,7 @@ if ($docId <= 0 || ($_SESSION['userid'] ?? '') === 'guest') {
 }
 
 $userData = new UserData($DATA_DIR);
-$midosIndex = new MidosIndex($DATA_DIR);
+$lib = get_opac_library();
 
 $action = req('action', 'view');
 $message = '';
@@ -28,11 +28,10 @@ if ($action === 'save') {
 }
 
 $noteText = $userData->getNote($username, $docId) ?? '';
-$record = $midosIndex->getRecord($docId);
-$title = 'Unbekannt';
-if ($record) {
-    $parsed = parse_pdok_fields(mb_convert_encoding($record, 'UTF-8', 'ISO-8859-1'));
-    $title = $parsed['HST'] ?? ($parsed['TI'] ?? 'Unbekannter Titel');
+$record = get_opac_library()->getRecord($docId);
+$title = $record ? ($record['title'] ?: 'Unbekannt') : 'Unbekannt';
+if ($title === 'Unbekannt') {
+    $title = 'Unbekannter Titel';
 }
 
 render_header($HTML_TITLE . ' - Notiz');

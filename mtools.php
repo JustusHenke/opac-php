@@ -55,7 +55,7 @@ if ($action === 'clear') {
 if ($action === 'export_bibtex') {
     require_once __DIR__ . '/MidosIndex.php';
     $indexDir = dirname($PDOK_PDK);
-    $midosIndex = new MidosIndex($indexDir);
+    $lib = get_opac_library();
     
     $cart = $_SESSION['cart'] ?? [];
     if (empty($cart)) {
@@ -66,18 +66,31 @@ if ($action === 'export_bibtex') {
     header('Content-Disposition: attachment; filename="export.bib"');
 
     foreach ($cart as $id) {
-        $raw = $midosIndex->getRecord((int)$id);
-        if ($raw === null) continue;
-        
-        $raw = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
-        $fields = parse_pdok_fields($raw);
-        
+        $rec = $lib->getRecord((int)$id);
+        if ($rec === null) continue;
+
+        if (($rec['source'] ?? '') === 'bib') {
+            // BibTeX-Bestand: verlustfreier Roundtrip der Originalfelder
+            $type = $rec['entry_type'] !== '' ? $rec['entry_type'] : 'misc';
+            $citekey = $rec['citekey'] !== '' ? $rec['citekey'] : 'ref' . $rec['id'];
+            echo "@" . $type . "{" . $citekey . ",\n";
+            foreach ($rec['fields'] as $k => $v) {
+                if ($k === 'file') continue; // lokale Zotero-Pfade nicht exportieren
+                echo "  " . $k . " = {" . (string)$v . "},\n";
+            }
+            echo "}\n\n";
+            continue;
+        }
+
+        // MIDOS-Bestand: Feld-Mapping wie bisher
+        $fields = $rec['fields'];
+
         // Determine type
         $dty = $fields['DTY'] ?? '';
         $type = 'misc';
         if ($dty === 'ZA') $type = 'article';
         elseif (stripos($dty, 'Druckwerk') !== false) $type = 'book';
-        
+
         // ID
         $bibId = 'ref' . $id;
         
@@ -155,15 +168,13 @@ if ($cart === []): ?>
     <?php
     require_once __DIR__ . '/MidosIndex.php';
     $indexDir = dirname($PDOK_PDK);
-    $midosIndex = new MidosIndex($indexDir);
+    $lib = get_opac_library();
 
     foreach ($cart as $ln):
-        $raw = $midosIndex->getRecord((int)$ln);
-        if ($raw === null) {
+        $rec = $lib->getRecord((int)$ln);
+        if ($rec === null) {
             continue;
         }
-        $raw = mb_convert_encoding($raw, 'UTF-8', 'ISO-8859-1');
-        $rec = format_pdok_record($raw);
         ?>
         <div class="result-card">
             <div class="result-title">
