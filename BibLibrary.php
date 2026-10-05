@@ -22,6 +22,16 @@ require_once __DIR__ . '/BibTeXParser.php';
  */
 class BibLibrary implements OpacLibrary
 {
+    /** Logdatei für Import-Läufe (Dubletten, Entfernungen, Kennzahlen). */
+    private const IMPORT_LOG = 'import.log';
+
+    /**
+     * Obergrenze der Detailzeilen je Kategorie und Lauf. Verhindert, dass ein
+     * pathologischer Bestand (z. B. dieselbe Datei 100.000-fach) das Log
+     * unbrennbar groß macht; die Gesamtzahl wird immer korrekt geloggt.
+     */
+    private const IMPORT_LOG_MAX_DETAIL = 20000;
+
     private string $bibDir;
     private ?PDO $db = null;
 
@@ -39,7 +49,39 @@ class BibLibrary implements OpacLibrary
 
     // ================================================================ Bestand/Import
 
-    /** Erzwingt beim ersten Zugriff einen Abgleich, wenn sich die neueste .bib geändert hat. */
+    /**
+     * Große Bestände werden NICHT mehr automatisch beim Seitenaufruf importiert.
+     *
+     * Grund: der Abgleich ist ein schwerer, synchroner Vorgang. Bei einem
+     * Bestand von mehreren 10.000 Einträgen läuft er in ein Request-Timeout
+     * oder memory_limit und die Seite antwortet mit HTTP 500 – bisher trat das
+     * genau deshalb beim Login (Gastzugang) auf, weil die erste Seite nach dem
+     * Login den Bestand lädt. Stattdessen wird der Bedarf nur markiert
+     * (meta 'sync_pending') und der Import manuell über mimport.php bzw.
+     * `php import_bibtex.php` angestoßen.
+     *
+     * Kleine Bestände bleiben bequem: bis AUTO_SYNC_MAX_BYTES wird weiterhin
+     * automatisch importiert (Obergrenze per OPAC_AUTO_SYNC_MAX_BYTES
+     * überschreibbar, 0 = nie).
+     */
+    private const AUTO_SYNC_MAX_BYTES = 8388608; // 8 MB
+
+    /** @return int Obergrenze für den Auto-Import in Bytes (0 = aus). */
+    private function autoSyncLimit(): int
+    {
+        $env = getenv('OPAC_AUTO_SYNC_MAX_BYTES');
+        if ($env !== false && $env !== '' && ctype_digit($env)) {
+            return (int) $env;
+        }
+        return self::AUTO_SYNC_MAX_BYTES;
+    }
+
+    /**
+     * Erzwingt beim ersten Zugriff einen Abgleich, wenn sich die neueste .bib geändert hat.
+     * Kleine Dateien werden automatisch importiert, große nur markiert (siehe
+     * AUTO_SYNC_MAX_BYTES) – ein Seitenaufruf darf nie einen Import starten,
+     * der an Time-/Memory-Limits scheitert.
+     */
     private function ensureFresh(): void
     {
         try {
@@ -47,10 +89,36 @@ class BibLibrary implements OpacLibrary
             if ($newest === null) {
                 return;
             }
-            if (md5_file($newest['path']) === $this->getMeta('last_file_md5')) {
+
+            // Schnellpfad: Datei ist unangetastet (gleicher Name/mtime/Größe) –
+            // dann genügt ein Meta-Vergleich, ohne die ganze Datei zu hashen.
+            if ($this->getMeta('last_file') === $newest['name']
+                && $this->getMeta('last_file_mtime') === (string) $newest['mtime']
+                && $this->getMeta('last_file_size') === (string) $newest['size']) {
                 return;
             }
+
+            if (md5_file($newest['path']) === $this->getMeta('last_file_md5')) {
+                return; // nur mtime/Name aktualisiert, Inhalt identisch
+            }
+
+            $limit = $this->autoSyncLimit();
+            if ($limit > 0 && $newest['size'] > $limit) {
+                // Zu groß für einen Auto-Import im Request: markieren, nicht blockieren.
+                $this->setMeta(
+                    'sync_pending',
+                    json_encode([
+                        'file' => $newest['name'],
+                        'size' => $newest['size'],
+                        'mtime' => $newest['mtime'],
+                        'since' => date('c'),
+                    ], JSON_UNESCAPED_UNICODE)
+                );
+                return;
+            }
+
             $this->sync();
+            $this->setMeta('sync_pending', '');
         } catch (Throwable $e) {
             $this->setMeta('last_error', date('c') . ' – ' . $e->getMessage());
         }
@@ -125,41 +193,58 @@ class BibLibrary implements OpacLibrary
         $db = $this->getDb();
         $newest = $this->findNewestBib();
         if ($newest === null) {
+            $this->writeImportLog([sprintf('[%s] Import nicht ausgeführt: Keine .bib-Datei unter data/bib gefunden.', date('Y-m-d H:i:s'))]);
             return ['status' => 'no_file', 'message' => 'Keine .bib-Datei unter data/bib gefunden.'];
         }
 
         $md5 = md5_file($newest['path']);
         if (!$forceFull && $md5 === $this->getMeta('last_file_md5')) {
+            $this->writeImportLog([sprintf('[%s] Import übersprungen: %s ist unverändert (MD5 %s).', date('Y-m-d H:i:s'), $this->logSafe($newest['name']), $md5)]);
             return ['status' => 'up_to_date', 'file' => $newest['name']];
         }
 
-        $parser = new BibTeXParser();
-        $source = (string) file_get_contents($newest['path']);
-        $parsed = $parser->parse($source);
+        // Log-Kopf für diesen Lauf (Dubletten/Entfernungen folgen weiter unten).
+        $logStarted = time();
+        $dupLog = [];      // Dubletten innerhalb der Datei
+        $removedLog = [];  // aus dem Bestand entfernte Datensätze
+        $logLines = [
+            str_repeat('=', 78),
+            sprintf('[%s] Import gestartet', date('Y-m-d H:i:s', $logStarted)),
+            sprintf('  Quelle   : %s (%s Bytes, geändert %s)',
+                $this->logSafe($newest['name']),
+                number_format($newest['size'], 0, ',', '.'),
+                date('Y-m-d H:i', (int) $newest['mtime'])),
+            sprintf('  MD5      : %s', $md5),
+            sprintf('  Modus    : %s', $forceFull ? 'Vollimport (force)' : 'Abgleich mit neuester Datei'),
+            sprintf('  Umgebung : PHP %s (%s), memory_limit=%s', PHP_VERSION, PHP_SAPI, (string) ini_get('memory_limit')),
+            sprintf('  Bestand  : %s Datensätze vor dem Lauf', number_format($this->countRecords(), 0, ',', '.')),
+            str_repeat('=', 78),
+        ];
 
-        // Duplikate innerhalb der Datei (anhand Fingerprint) entfernen
-        $unique = [];
-        $fpCount = [];
-        foreach ($parsed as $e) {
-            $fp = $this->fingerprint($e);
-            $fpCount[$fp] = ($fpCount[$fp] ?? 0) + 1;
-            if ($fpCount[$fp] === 1) {
-                $unique[$fp] = $e;
-            }
+        // Ein Import kann bei großen Beständen Minuten dauern: Limit anheben,
+        // soweit die Konfiguration es zulässt (CLI ist ohnehin unbegrenzt).
+        if (PHP_SAPI !== 'cli') {
+            @set_time_limit(0);
         }
-        $duplicates = count($parsed) - count($unique);
+
+        $parser = new BibTeXParser();
+        // Streamend parsen: es ist immer nur ein Eintrag gleichzeitig im Speicher.
+        // Vorher lag das komplette Parse-Ergebnis als Array im RAM – bei großen
+        // Dateien (mehrfache Dateigröße im Speicher) scheiterte der Import an
+        // memory_limit bzw. max_execution_time.
+        $stream = $parser->stream((string) file_get_contents($newest['path']));
 
         $stats = [
             'status' => 'synced',
             'file' => $newest['name'],
-            'parsed' => count($parsed),
-            'unique' => count($unique),
-            'duplicates' => $duplicates,
+            'parsed' => 0,
+            'unique' => 0,
+            'duplicates' => 0,
             'inserted' => 0,
             'updated' => 0,
             'unchanged' => 0,
             'removed' => 0,
-            'errors' => count($parser->errors),
+            'errors' => 0,
         ];
 
         $db->exec('PRAGMA busy_timeout = 30000');
@@ -188,9 +273,23 @@ class BibLibrary implements OpacLibrary
                     fields_json=?, source_file=?, updated_at=CURRENT_TIMESTAMP WHERE id=?'
             );
 
+            // Duplikate innerhalb der Datei (anhand Fingerprint) überspringen:
+            // der erste Treffer gewinnt – wie zuvor, nur ohne Zwischen-Array.
             $seenFps = [];
-            foreach ($unique as $fp => $e) {
+            foreach ($stream as $e) {
+                $stats['parsed']++;
+                $fp = $this->fingerprint($e);
+                if (isset($seenFps[$fp])) {
+                    $stats['duplicates']++;
+                    if (count($dupLog) < self::IMPORT_LOG_MAX_DETAIL) {
+                        // Erster Treffer behält den Datensatz, dieser wird verworfen.
+                        $dupLog[] = sprintf('    %d. %s', $stats['duplicates'], $this->describeEntry($e, $fp));
+                    }
+                    continue;
+                }
                 $seenFps[$fp] = true;
+                $stats['unique']++;
+
                 $row = $this->toRow($e, $newest['name'], $fp);
                 $ch = $this->contentHash($e);
 
@@ -219,22 +318,50 @@ class BibLibrary implements OpacLibrary
                     $stats['inserted']++;
                 }
             }
+            $stats['errors'] = count($parser->errors);
+            unset($stream);
 
-            // Bereinigen: Einträge, die in der neuesten Datei nicht mehr vorkommen
+            // Bereinigen: Einträge, die in der neuesten Datei nicht mehr vorkommen.
+            // Die Quelldatei ist die Quelle der Wahrheit: was dort fehlt, fliegt raus.
             $db->exec('CREATE TEMP TABLE IF NOT EXISTS keep_fp (fp TEXT PRIMARY KEY)');
             $db->exec('DELETE FROM keep_fp');
             $ins = $db->prepare('INSERT OR IGNORE INTO keep_fp (fp) VALUES (?)');
             foreach (array_keys($seenFps) as $fp) {
                 $ins->execute([$fp]);
             }
-            $stats['removed'] = (int) $db->query('SELECT COUNT(*) FROM entries WHERE fingerprint NOT IN (SELECT fp FROM keep_fp)')->fetchColumn();
+            // Vor dem DELETE werden die betroffenen Datensätze für das Log gelesen
+            // (gestreamt, nicht gepuffert – sonst wächst der Speicherbedarf).
+            $removedStmt = $db->query(
+                'SELECT id, fingerprint, citekey, title, year, doi, source_file
+                   FROM entries WHERE fingerprint NOT IN (SELECT fp FROM keep_fp)'
+            );
+            $stats['removed'] = 0;
+            foreach ($removedStmt as $rm) {
+                $stats['removed']++;
+                if (count($removedLog) < self::IMPORT_LOG_MAX_DETAIL) {
+                    $removedLog[] = sprintf('    %d. id=%d | Titel: %s | Jahr: %s | Citekey: %s | DOI: %s | Datei: %s',
+                        $stats['removed'],
+                        (int) $rm['id'],
+                        $this->logSafe((string) ($rm['title'] ?? ''), 160) ?: '(ohne Titel)',
+                        $this->logSafe((string) ($rm['year'] ?? ''), 20) ?: '-',
+                        $this->logSafe((string) ($rm['citekey'] ?? ''), 80) ?: '-',
+                        $this->logSafe((string) ($rm['doi'] ?? ''), 80) ?: '-',
+                        $this->logSafe((string) ($rm['source_file'] ?? ''), 80) ?: '-'
+                    );
+                }
+            }
+            $removedStmt->closeCursor();
             $db->exec('DELETE FROM entries WHERE fingerprint NOT IN (SELECT fp FROM keep_fp)');
-            $db->exec('DROP TABLE keep_fp');
 
             $db->commit();
         } catch (Throwable $e) {
             $db->rollBack();
             $this->setMeta('last_error', date('c') . ' – ' . $e->getMessage());
+            $this->writeImportLog(array_merge($logLines, [
+                sprintf('[%s] Import ABGEBROCHEN – Rollback ausgeführt', date('Y-m-d H:i:s')),
+                sprintf('  Fehler  : %s: %s', get_class($e), $e->getMessage()),
+                sprintf('  Dauer   : %s', $this->formatDuration(time() - $logStarted)),
+            ]));
             throw $e;
         }
 
@@ -247,8 +374,126 @@ class BibLibrary implements OpacLibrary
         $this->setMeta('last_file_md5', $md5);
         $this->setMeta('last_sync', date('Y-m-d H:i:s'));
         $this->setMeta('last_stats', json_encode($stats, JSON_UNESCAPED_UNICODE));
+        $this->setMeta('sync_pending', '');
         $this->setMeta('last_error', '');
+
+        // Dubletten/Entfernungen und Kennzahlen protokollieren.
+        $logLines[] = sprintf('[%s] Dubletten in der Quelldatei (übersprungen, erster Treffer behalten): %s',
+            date('Y-m-d H:i:s'), number_format($stats['duplicates'], 0, ',', '.'));
+        $logLines = array_merge($logLines, $dupLog);
+        if ($stats['duplicates'] > count($dupLog)) {
+            $logLines[] = sprintf('    … %s weitere Dubletten nicht einzeln aufgeführt (Log-Obergrenze).',
+                number_format($stats['duplicates'] - count($dupLog), 0, ',', '.'));
+        }
+        if ($stats['duplicates'] === 0) {
+            $logLines[] = '    (keine)';
+        }
+
+        $logLines[] = sprintf('[%s] Aus dem Bestand entfernt (nicht mehr in der Quelldatei enthalten): %s',
+            date('Y-m-d H:i:s'), number_format($stats['removed'], 0, ',', '.'));
+        $logLines = array_merge($logLines, $removedLog);
+        if ($stats['removed'] > count($removedLog)) {
+            $logLines[] = sprintf('    … %s weitere Datensätze nicht einzeln aufgeführt (Log-Obergrenze).',
+                number_format($stats['removed'] - count($removedLog), 0, ',', '.'));
+        }
+        if ($stats['removed'] === 0) {
+            $logLines[] = '    (keine)';
+        }
+
+        $logLines[] = sprintf('[%s] Zusammenfassung: parsed=%s unique=%s duplicates=%s inserted=%s updated=%s unchanged=%s removed=%s total=%s errors=%s | Dauer: %s',
+            date('Y-m-d H:i:s'),
+            number_format($stats['parsed'], 0, ',', '.'),
+            number_format($stats['unique'], 0, ',', '.'),
+            number_format($stats['duplicates'], 0, ',', '.'),
+            number_format($stats['inserted'], 0, ',', '.'),
+            number_format($stats['updated'], 0, ',', '.'),
+            number_format($stats['unchanged'], 0, ',', '.'),
+            number_format($stats['removed'], 0, ',', '.'),
+            number_format($stats['total'], 0, ',', '.'),
+            number_format($stats['errors'], 0, ',', '.'),
+            $this->formatDuration(time() - $logStarted)
+        );
+        $this->writeImportLog($logLines);
+
         return $stats;
+    }
+
+    /** Pfad der Import-Logdatei (data/bib/import.log, webgeschützt über data/.htaccess). */
+    public function importLogPath(): string
+    {
+        return $this->bibDir . DIRECTORY_SEPARATOR . self::IMPORT_LOG;
+    }
+
+    /**
+     * Hängt einen Block an die Import-Logdatei an (Zeitstempel je Lauf in der
+     * Kopfzeile). Fehler beim Schreiben dürfen den Import nie abbrechen.
+     *
+     * @param string[] $lines
+     */
+    private function writeImportLog(array $lines): void
+    {
+        if ($lines === []) {
+            return;
+        }
+        $text = '';
+        foreach ($lines as $line) {
+            // Einrückung bleibt erhalten, erst der Text wird normalisiert.
+            $body = ltrim($line, " \t");
+            $indent = substr($line, 0, strlen($line) - strlen($body));
+            $text .= $indent . $this->logSafe($body, 4000) . "\n";
+        }
+        if (@file_put_contents($this->importLogPath(), $text, FILE_APPEND | LOCK_EX) === false) {
+            error_log('[BibLibrary] Import-Log nicht schreibbar: ' . $this->importLogPath());
+        }
+    }
+
+    /**
+     * Log-taugliche Einzeilermeldung: Steuerzeichen/Umbrüche entfernen,
+     * Whitespace normalisieren, Länge begrenzen. Ticker und unmaskierte
+     * LaTeX-Sonderzeichen bleiben möglichst erhalten.
+     */
+    private function logSafe(string $text, int $max = 240): string
+    {
+        $t = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $text);
+        if ($t === null) { // ungültiges UTF-8 -> ohne /u erneut versuchen
+            $t = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $text) ?? '';
+        }
+        $w = preg_replace('/\s+/u', ' ', $t);
+        if ($w === null) {
+            $w = preg_replace('/\s+/', ' ', $t) ?? $t;
+        }
+        $w = trim($w);
+        if ($max > 0 && mb_strlen($w) > $max) {
+            $w = mb_substr($w, 0, $max) . '…';
+        }
+        return $w;
+    }
+
+    /** Kurzbeschreibung eines geparsten Eintrags für die Dubletten-Protokollierung. */
+    private function describeEntry(array $e, string $fingerprint): string
+    {
+        $f = $e['fields'] ?? [];
+        $authors = $this->splitNames((string) ($f['author'] ?? ($f['editor'] ?? '')));
+        $doi = strtolower(trim(preg_replace('~^https?://(dx\.)?doi\.org/~i', '', $f['doi'] ?? '') ?? ''));
+        return sprintf(
+            'Titel: %s | Jahr: %s | Erstautor: %s | DOI: %s | Typ: %s | Citekey: %s | Fingerprint: %s',
+            $this->logSafe((string) ($f['title'] ?? ''), 160) ?: '(ohne Titel)',
+            $this->extractYear($f) ?: '-',
+            $this->logSafe($authors[0] ?? '', 80) ?: '-',
+            $doi !== '' ? $doi : '-',
+            $this->logSafe((string) ($e['type'] ?? ''), 30) ?: '-',
+            $this->logSafe((string) ($e['citekey'] ?? ''), 80) ?: '-',
+            $fingerprint
+        );
+    }
+
+    /** Sekunden als lesbare Dauer ("20.3 s", "1 min 04 s"). */
+    private function formatDuration(int $seconds): string
+    {
+        if ($seconds < 60) {
+            return number_format((float) $seconds, 1, ',', '.') . ' s';
+        }
+        return sprintf('%d min %02d s', intdiv($seconds, 60), $seconds % 60);
     }
 
     /** Erzeugt die Spaltenwerte für entries aus einem geparsten Eintrag. */
@@ -616,29 +861,35 @@ class BibLibrary implements OpacLibrary
             ? $this->splitNames((string) $f['editor'])
             : [];
 
+        // Anzeigefelder werden für die Ausgabe entklammert und dekodiert: In der .bib
+        // stehen die Werte als {geschuetzt} bzw. mit LaTeX-Makros (z. B.
+        // {Hinterbühne}, \"{a}), weil BibTeX so die Großschreibung erhält. Roh
+        // bleiben fields_json und alltext – die dienen Suche und Fingerprint.
+        $disp = static fn (string $v): string => BibTeXParser::decodeLatex(trim($v));
+
         $rec = [
             'id' => (int) $row['id'],
             'source' => 'bib',
             'citekey' => (string) $row['citekey'],
             'entry_type' => (string) $row['entry_type'],
             'type_label' => $this->typeLabel((string) $row['entry_type']),
-            'title' => (string) $row['title'],
-            'subtitle' => (string) $row['subtitle'],
+            'title' => $disp((string) $row['title']),
+            'subtitle' => $disp((string) $row['subtitle']),
             'authors' => $authors,
             'editors' => $editors,
-            'journal' => (string) $row['journal'],
+            'journal' => $disp((string) $row['journal']),
             'year' => (string) $row['year'],
-            'volume' => (string) ($f['volume'] ?? ''),
-            'issue' => (string) ($f['number'] ?? ($f['issue'] ?? '')),
-            'pages' => (string) ($f['pages'] ?? ''),
-            'publisher' => (string) ($f['publisher'] ?? ''),
-            'location' => (string) ($f['location'] ?? ($f['address'] ?? '')),
+            'volume' => $disp((string) ($f['volume'] ?? '')),
+            'issue' => $disp((string) ($f['number'] ?? ($f['issue'] ?? ''))),
+            'pages' => $disp((string) ($f['pages'] ?? '')),
+            'publisher' => $disp((string) ($f['publisher'] ?? '')),
+            'location' => $disp((string) ($f['location'] ?? ($f['address'] ?? ''))),
             'url' => (string) $row['url'],
             'doi' => (string) $row['doi'],
             'isbn_issn' => (string) $row['isbn_issn'],
             'language' => (string) $row['language'],
-            'abstract' => (string) $row['abstract'],
-            'keywords' => array_values(array_filter(array_map('trim', preg_split('/[,;]+/', $row['keywords'] ?? '') ?: []))),
+            'abstract' => $disp((string) $row['abstract']),
+            'keywords' => array_values(array_filter(array_map($disp, preg_split('/[,;]+/', $row['keywords'] ?? '') ?: []))),
             'fields' => $f,
             'alltext' => (string) $row['alltext'],
         ];
@@ -750,7 +1001,44 @@ class BibLibrary implements OpacLibrary
         if ($stats['last_stats'] !== '') {
             $stats['last_stats'] = json_decode($stats['last_stats'], true) ?: [];
         }
+        $stats['sync_pending'] = $this->pendingImport();
         return $stats;
+    }
+
+    /**
+     * Bestands-Metadaten für die Frontend-Anzeige: Zeitpunkt des letzten
+     * Abgleichs sowie Name und Größe der zuletzt importierten .bib-Datei.
+     * Liefert bewusst nur Angaben, keine Import-Aktion.
+     *
+     * @return array{last_sync:int|null,file:string,file_size:int,pending:array|null}
+     */
+    public function stockInfo(): array
+    {
+        $sync = $this->getMeta('last_sync') ?: '';
+        $ts = ($sync !== '') ? strtotime($sync) : false;
+
+        return [
+            'last_sync' => ($ts === false) ? null : (int) $ts,
+            'file' => $this->getMeta('last_file') ?: '',
+            'file_size' => (int) ($this->getMeta('last_file_size') ?: '0'),
+            'pending' => $this->pendingImport(),
+        ];
+    }
+
+    /**
+     * Ausstehender Abgleich oder null: die neueste .bib hat sich geändert, ist aber
+     * zu groß für einen Auto-Import im Seitenaufruf (siehe ensureFresh()).
+     *
+     * @return array{file:string,size:int,mtime:int,since:string}|null
+     */
+    public function pendingImport(): ?array
+    {
+        $raw = $this->getMeta('sync_pending') ?: '';
+        if ($raw === '') {
+            return null;
+        }
+        $data = json_decode($raw, true);
+        return is_array($data) ? $data : ['file' => $raw];
     }
 
     public function getMeta(string $key): ?string

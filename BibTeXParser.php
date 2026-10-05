@@ -35,22 +35,44 @@ class BibTeXParser
      * Parst eine .bib-Quelle und liefert eine Liste von Einträgen:
      * [['citekey' => string, 'type' => string, 'fields' => array<string,string>], ...]
      *
+     * Achtung: Die vollständige Liste liegt danach im Speicher. Für große
+     * Bestände stream()-benutzen (siehe dort).
+     *
      * @return array<int,array{citekey:string,type:string,fields:array<string,string>}>
      */
     public function parse(string $source): array
     {
+        return iterator_to_array($this->stream($source), false);
+    }
+
+    /**
+     * Parst eine .bib-Quelle eintragsweise als Generator.
+     *
+     * Der Speicherbedarf bleibt dadurch (bis auf die Quelldatei) konstant und
+     * unabhängig von der Anzahl der Einträge. Für große Bestände (z. B. 90 MB
+     * mit 60.000+ Einträgen) ist das zwingend: als Array läge die Parse-Ergebnis
+     * mehrfach so groß im Speicher wie die Datei und der Import scheitert an
+     * memory_limit/max_execution_time.
+     *
+     * @return Generator<int,array{citekey:string,type:string,fields:array<string,string>}>
+     */
+    public function stream(string $source): Generator
+    {
         $this->errors = [];
         $this->macros = [];
 
-        $src = $source;
-        if (substr($src, 0, 3) === "\xEF\xBB\xBF") {
-            $src = substr($src, 3); // BOM entfernen
+        if (substr($source, 0, 3) === "\xEF\xBB\xBF") {
+            $source = substr($source, 3); // BOM entfernen
         }
-        $this->src = str_replace(["\r\n", "\r"], "\n", $src);
+        // Zeilenenden nur bei Bedarf normalisieren (spart bei reinen LF-Dateien
+        // eine Komplettkopie der Quelldatei im Speicher).
+        if (strpos($source, "\r") !== false) {
+            $source = str_replace(["\r\n", "\r"], "\n", $source);
+        }
+        $this->src = $source;
         $this->len = strlen($this->src);
         $this->pos = 0;
 
-        $entries = [];
         while (($at = stripos($this->src, '@', $this->pos)) !== false) {
             $this->pos = $at + 1;
             $this->skipWs();
@@ -77,11 +99,10 @@ class BibTeXParser
                 default:
                     $entry = $this->parseEntry($close, $type);
                     if ($entry !== null) {
-                        $entries[] = $entry;
+                        yield $entry;
                     }
             }
         }
-        return $entries;
     }
 
     // ------------------------------------------------------------------ Innenleben
@@ -171,65 +192,71 @@ class BibTeXParser
         return implode('', $parts);
     }
 
-    /** Liest ein {...}-Literal (Klammern werden ausgezählt), liefert Inhalt ohne äußere Klammern. */
+    /**
+     * Liest ein {...}-Literal (Klammern werden ausgezählt), liefert Inhalt ohne äußere Klammern.
+     *
+     * Springt über Klammerfreie Strecken mit strcspn() statt zeichenweise zu
+     * laufen – sonst ist der Parser für große Dateien um Größenordnungen langsamer.
+     */
     private function readBraced(): string
     {
         $this->pos++; // {
-        $out = '';
+        $start = $this->pos;
         $depth = 1;
         while ($this->pos < $this->len) {
-            $ch = $this->src[$this->pos];
-            if ($ch === '{') {
+            $this->pos += strcspn($this->src, '{}', $this->pos);
+            if ($this->pos >= $this->len) {
+                break;
+            }
+            if ($this->src[$this->pos] === '{') {
                 $depth++;
-            } elseif ($ch === '}') {
+                $this->pos++;
+            } else {
                 $depth--;
+                $this->pos++;
                 if ($depth === 0) {
-                    $this->pos++;
                     break;
                 }
             }
-            $out .= $ch;
-            $this->pos++;
         }
-        return $out;
+        $end = $depth === 0 ? $this->pos - 1 : $this->pos; // schließende Klammer auslassen
+        return substr($this->src, $start, $end - $start);
     }
 
     /** Liest ein "..."-Literal; { }-Klammern innerhalb schützen Anführungszeichen. */
     private function readQuoted(): string
     {
         $this->pos++; // "
-        $out = '';
+        $start = $this->pos;
         $brace = 0;
         while ($this->pos < $this->len) {
+            $this->pos += strcspn($this->src, '{}"', $this->pos);
+            if ($this->pos >= $this->len) {
+                break;
+            }
             $ch = $this->src[$this->pos];
+            $this->pos++;
             if ($ch === '{') {
                 $brace++;
             } elseif ($ch === '}') {
                 if ($brace > 0) {
                     $brace--;
                 }
-            } elseif ($ch === '"' && $brace === 0) {
-                $this->pos++;
-                break;
+            } else { // '"' auf Ebene 0 beendet den Wert
+                if ($brace === 0) {
+                    break;
+                }
             }
-            $out .= $ch;
-            $this->pos++;
         }
-        return $out;
+        $end = ($brace === 0 && $this->pos <= $this->len && $this->pos > $start
+            && $this->src[$this->pos - 1] === '"') ? $this->pos - 1 : $this->pos;
+        return substr($this->src, $start, $end - $start);
     }
 
     private function readIdent(): string
     {
         $start = $this->pos;
-        while ($this->pos < $this->len) {
-            $ch = $this->src[$this->pos];
-            if ($ch === ',' || $ch === '=' || $ch === '{' || $ch === '}' || $ch === '('
-                || $ch === ')' || $ch === '"' || $ch === '#' || $ch === ' '
-                || $ch === "\n" || $ch === "\t") {
-                break;
-            }
-            $this->pos++;
-        }
+        $this->pos += strcspn($this->src, ",={}()\"# \n\t", $this->pos);
         return rtrim(substr($this->src, $start, $this->pos - $start));
     }
 
@@ -254,18 +281,22 @@ class BibTeXParser
     private function skipBalanced(string $close): void
     {
         $depth = 1;
+        $stop = $close . '{}'; // schließende Klammer + geschweifte Klammern
         while ($this->pos < $this->len) {
+            $this->pos += strcspn($this->src, $stop, $this->pos);
+            if ($this->pos >= $this->len) {
+                break;
+            }
             $ch = $this->src[$this->pos];
+            $this->pos++;
             if ($ch === '{') {
                 $depth++;
-            } elseif ($ch === '}' || $ch === $close) {
+            } else {
                 $depth--;
                 if ($depth === 0) {
-                    $this->pos++;
                     break;
                 }
             }
-            $this->pos++;
         }
     }
 
@@ -279,13 +310,8 @@ class BibTeXParser
 
     private function skipWs(): void
     {
-        while ($this->pos < $this->len) {
-            $ch = $this->src[$this->pos];
-            if ($ch === ' ' || $ch === "\n" || $ch === "\t") {
-                $this->pos++;
-            } else {
-                break;
-            }
+        if ($this->pos < $this->len) {
+            $this->pos += strspn($this->src, " \n\t", $this->pos);
         }
     }
 
@@ -297,6 +323,12 @@ class BibTeXParser
      */
     public static function decodeLatex(string $s): string
     {
+        // Literale Klammern schützen: \{ und \} bleiben als Zeichen erhalten,
+        // alle anderen Klammern sind nur Gruppierung (Großschreibungserhaltung)
+        // und werden am Ende entfernt. Die Platzhalter liegen im privaten
+        // Unicode-Bereich, damit die Dekodierung wiederholbar bleibt.
+        $s = strtr($s, ['\\{' => "\u{E000}", '\\}' => "\u{E001}"]);
+
         $accent = function (array $m): string {
             $ch = $m['ch'];
             $mark = $m['mark'];
@@ -365,7 +397,6 @@ class BibTeXParser
             '\\textbf{' => '', // Restliche Formatierung grob entfernen:
             '\\&' => '&', '\\%' => '%', '\\_' => '_', '\\#' => '#', '\\$' => '$',
             '\\,' => ' ', '\\;' => ' ', '\\:' => ' ', '\\!' => ' ',
-            '\\{' => '{', '\\}' => '}',
         ];
         $s = strtr($s, $simple);
         // \emph{...}, \textit{...}, \textbf{...} → Inhalt
@@ -374,6 +405,12 @@ class BibTeXParser
         $s = str_replace(['``', "''"], ['“', '”'], $s);
         // Gedankenstriche
         $s = str_replace(['---', '--'], ['—', '–'], $s);
-        return $s;
+        // Gruppierungsklammern entfernen: In BibTeX dienen sie nur dazu, die
+        // Großschreibung zu erhalten ({WiKet} -> WiKet). Sie gehören nicht in
+        // die Anzeige. Geschützte literale Klammern bleiben erhalten (eine
+        // Anwendung genügt – alle Anzeigewege dekodieren genau einmal; die
+        // Suche normalisiert ohnehin alle Nicht-Buchstaben weg).
+        $s = str_replace(['{', '}'], '', $s);
+        return strtr($s, ["\u{E000}" => '{', "\u{E001}" => '}']);
     }
 }

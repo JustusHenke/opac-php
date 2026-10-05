@@ -85,7 +85,7 @@ else:
         </div>
     <?php endif; ?>
 
-    <div class="search-box" style="margin-top: 40px;">
+    <div class="search-box" style="margin-top: 40px;" id="neue-sammlung">
         <h3><?= ueb('Neue Sammlung aus Warenkorb erstellen') ?></h3>
         <?php if (empty($_SESSION['cart'])): ?>
             <p class="status-muted"><?= ueb('Ihr Warenkorb ist leer.') ?></p>

@@ -137,7 +137,13 @@ if ($action === 'export_bibtex') {
 render_header($HTML_TITLE);
 render_app_header(ueb('Warenkorb'));
 
-if (!is_readable($PDOK_PDK)): ?>
+// Nur im MIDOS-Modus ist die pdok.pdk die Datenquelle. Im BibTeX-Modus kommt
+// der Bestand aus der SQLite-Datenbank – sonst wäre der Warenkorb dort nicht
+// erreichbar.
+global $DATA_SOURCE;
+$cartBlocked = ($DATA_SOURCE ?? 'bibtex') !== 'bibtex' && !is_readable($PDOK_PDK);
+
+if ($cartBlocked): ?>
     <p class="status-error">
         <?= htmlspecialchars(ueb('Datenbank ist nicht lesbar – Warenkorb kann nicht angezeigt werden.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
     </p>
@@ -160,6 +166,11 @@ if ($cart === []): ?>
             <strong><?= count($cart) ?></strong>
         </span>
         <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+            <?php if (($_SESSION['userid'] ?? '') !== 'guest'): ?>
+                <a href="mprofiles.php#neue-sammlung" class="btn btn-sm btn-primary">
+                    <?= htmlspecialchars(ueb('als Sammlung speichern'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+                </a>
+            <?php endif; ?>
             <a href="mtools.php?action=export_bibtex" class="btn btn-sm" style="background-color: var(--secondary); color: white;">BibTeX Export</a>
             <a href="mtools.php?action=clear" class="btn btn-sm btn-danger">Warenkorb leeren</a>
         </div>

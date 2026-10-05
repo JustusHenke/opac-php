@@ -59,6 +59,8 @@ if ($action === 'sync' && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $stats = $bib->getStats();
 $newest = $bib->findNewestBib();
+// Protokoll über Dubletten, Entfernungen und Kennzahlen der Importläufe.
+$logPath = $bib->importLogPath();
 
 render_header($HTML_TITLE . ' – BibTeX-Import');
 render_app_header(ueb('BibTeX-Import'));
@@ -79,6 +81,21 @@ render_app_header(ueb('BibTeX-Import'));
 
     <?php if ($message): ?><p class="status-success"><?= htmlspecialchars($message) ?></p><?php endif; ?>
     <?php if ($error): ?><p class="status-error"><?= htmlspecialchars($error) ?></p><?php endif; ?>
+
+    <?php if (!empty($stats['sync_pending'])): ?>
+        <p class="status-error">
+            <strong>Import ausstehend:</strong> Die neueste Datei
+            (<?= htmlspecialchars((string) ($stats['sync_pending']['file'] ?? '?')) ?><?php
+                if (!empty($stats['sync_pending']['size'])): ?>,
+                <?= number_format(((int) $stats['sync_pending']['size']) / 1048576, 1, ',', '.') ?> MB<?php endif; ?>)
+            wurde noch nicht abgeglichen. Sie wird beim Seitenaufruf bewusst <em>nicht</em> automatisch
+            importiert – große Bestände sprengen dabei das Zeit-/Speicherlimit der Anfrage (HTTP 500).
+            <?php if ($newest !== null && (int) ($newest['size'] ?? 0) > 8 * 1024 * 1024): ?>
+            <br><span class="muted">Bei dieser Dateigröße am besten über die Kommandozeile importieren
+                (kein Request-Timeout): <code>php import_bibtex.php</code></span>
+            <?php endif; ?>
+        </p>
+    <?php endif; ?>
     <?php if ($stats['last_error'] !== ''): ?>
         <?php // Serverpfade in Fehlermeldungen maskieren ?>
         <p class="status-error">Letzter Fehler: <?= htmlspecialchars(str_replace([$BASE_DIR, str_replace('\\', '/', $BASE_DIR)], '…', $stats['last_error'])) ?></p>
@@ -95,6 +112,13 @@ render_app_header(ueb('BibTeX-Import'));
         <?php endif; ?>
         <tr><td style="padding: 6px 12px 6px 0;" class="muted">Letzter Abgleich:</td>
             <td style="padding: 6px 0;"><?= htmlspecialchars($stats['last_sync'] !== '' ? $stats['last_sync'] : '—') ?></td></tr>
+        <?php if ($logPath !== ''): ?>
+        <tr><td style="padding: 6px 12px 6px 0;" class="muted">Import-Log:</td>
+            <td style="padding: 6px 0;">
+                <code><?= htmlspecialchars(str_replace([$BASE_DIR, str_replace('\\', '/', $BASE_DIR)], '…', $logPath)) ?></code>
+                (<?= is_file($logPath) ? number_format((int) filesize($logPath) / 1024, 1, ',', '.') . ' KB' : 'noch nicht vorhanden' ?>)
+            </td></tr>
+        <?php endif; ?>
         <?php if (!empty($stats['last_stats']) && is_array($stats['last_stats'])): ?>
         <tr><td style="padding: 6px 12px 6px 0;" class="muted">Ergebnis letzter Abgleich:</td>
             <td style="padding: 6px 0;">

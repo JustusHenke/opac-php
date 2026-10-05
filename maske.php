@@ -16,9 +16,16 @@ $qy = req('qy', ''); // Erscheinungsjahr
 // Bestandsinformationen ermitteln (je nach Datenquelle)
 $lib = get_opac_library();
 $totalEntries = $lib->countRecords();
-$lastUpdate = null;
 $isBibSource = $lib instanceof BibLibrary;
 $stockInfo = $isBibSource ? 'BibTeX-Bestand (data/bib)' : 'MIDOS-Bestand (data/midos)';
+
+// Zeitpunkt des letzten Abgleichs und Größe der importierten Quelldatei.
+// Reine Anzeigeangaben – der Import selbst läuft ausschließlich über
+// mimport.php (Admin-Secret) bzw. import_bibtex.php (CLI).
+$stock = $lib->stockInfo();
+$lastUpdate = $stock['last_sync'];
+$stockSize = (int) $stock['file_size'];
+$pendingImport = $stock['pending'];
 
 render_header($HTML_TITLE);
 render_app_header(ueb('Suchmaske'));
@@ -30,12 +37,27 @@ render_app_header(ueb('Suchmaske'));
         <span class="muted"><?= htmlspecialchars(ueb('Bestandsinformationen:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= htmlspecialchars(ueb('Einträge im Bestand:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= number_format($totalEntries, 0, ',', '.') ?>
-        (<?= htmlspecialchars($stockInfo, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>)<?php if ($lastUpdate): ?>,
-        <?= htmlspecialchars(ueb('Letzte Aktualisierung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
-        <?= date('d.m.Y H:i', $lastUpdate) ?></span>
-        <?php else: ?></span><?php endif; ?>
-        <?php if ($isBibSource): // Import-Aktion selbst ist per Admin-Secret geschützt (mimport.php) ?>
-        &nbsp;<a href="mimport.php" class="btn btn-sm">BibTeX-Import</a>
+        <!--(<?= htmlspecialchars($stockInfo, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>)-->
+        <?php if ($lastUpdate !== null): ?>
+            &middot; <?= htmlspecialchars(ueb('Letzte Aktualisierung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+            <?= date('d.m.Y H:i', (int) $lastUpdate) ?>
+        <?php endif; ?>
+    </p>
+</div>
+<?php endif; ?>
+
+<?php if ($pendingImport !== null): ?>
+<div class="status-error" style="margin-bottom: 16px;">
+    <p style="margin: 0;">
+        <?= htmlspecialchars(ueb('Der Bestand wurde noch nicht mit der neuesten Bibliotheksdatei abgeglichen.'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+        <?php if (!empty($pendingImport['file'])): ?>
+        <br><span class="muted">
+            <?= htmlspecialchars(ueb('Geändert:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+            <?= htmlspecialchars((string) $pendingImport['file'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
+            <?php if (!empty($pendingImport['size'])): ?>
+                (<?= number_format(((int) $pendingImport['size']) / 1048576, 1, ',', '.') ?> MB)
+            <?php endif; ?>
+        </span>
         <?php endif; ?>
     </p>
 </div>

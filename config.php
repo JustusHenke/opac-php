@@ -721,6 +721,17 @@ interface OpacLibrary
     public function iterateLight(): Traversable;
 
     public function countRecords(): int;
+
+    /**
+     * Bestands-Metadaten für die Anzeige (rein lesend, ohne Import-Aktion):
+     *   last_sync  int|null  Unix-Zeitstempel des letzten Abgleichs, null = unbekannt
+     *   file       string    Name der zuletzt importierten Quelldatei
+     *   file_size  int       Größe dieser Datei in Bytes, 0 = unbekannt
+     *   pending    array|null ausstehender Abgleich (siehe pendingImport())
+     *
+     * @return array{last_sync:int|null,file:string,file_size:int,pending:array|null}
+     */
+    public function stockInfo(): array;
 }
 
 /**

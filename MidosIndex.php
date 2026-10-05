@@ -186,6 +186,22 @@ class MidosIndex implements OpacLibrary
         }
     }
 
+    /**
+     * MIDOS-Bestand kennt weder Abgleich-Zeitpunkt noch Dateigröße; die
+     * Frontend-Anzeige blendet beide Angaben dann einfach aus.
+     *
+     * @return array{last_sync:int|null,file:string,file_size:int,pending:array|null}
+     */
+    public function stockInfo(): array
+    {
+        return [
+            'last_sync' => null,
+            'file' => '',
+            'file_size' => 0,
+            'pending' => null,
+        ];
+    }
+
     private function readRawRecord(int $docId): ?string
     {
         if ($docId < 1) return null;
