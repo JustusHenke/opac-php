@@ -819,6 +819,43 @@ class BibLibrary implements OpacLibrary
         return $this->toOpacRecord($row, false);
     }
 
+    /**
+     * Sortierschlüssel für eine ID-Menge (Autor/Jahr/Titel).
+     *
+     * Nur die drei Sortierspalten werden gelesen – kein fields_json, kein
+     * HTML-Aufbau. Die Schritte fassen je 500 IDs zusammen, damit die
+     * Anzahl-der-Parameter auch bei sehr großen Treffermengen begrenzt bleibt.
+     *
+     * @param int[] $ids
+     * @return array<int,array{author:string,year:string,title:string}>
+     */
+    public function sortKeys(array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if ($ids === []) {
+            return [];
+        }
+        $db = $this->getDb();
+        $out = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $db->prepare(
+                "SELECT id, authors, year, title FROM entries WHERE id IN ($placeholders)"
+            );
+            $stmt->execute($chunk);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $out[(int) $row['id']] = [
+                    // Autoren stehen in der Form "Nachname, Vorname" – die
+                    // Sortierung trifft damit zuerst den Nachnamen.
+                    'author' => sort_key((string) $row['authors']),
+                    'year' => trim((string) $row['year']),
+                    'title' => sort_key((string) $row['title']),
+                ];
+            }
+        }
+        return $out;
+    }
+
     /** Leichte Iteration über alle Einträge (für Freitext-Fallback). */
     public function iterateLight(): Traversable
     {

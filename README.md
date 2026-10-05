@@ -14,6 +14,21 @@ Dies ist die moderne PHP-Portierung des ursprünglich Perl-basierten **MIDOS-WEB
     - Mehrfeld-Suche über `Titel`, `Abstract`, `Quelle` und `Personen`.
     - Volle Unterstützung von Bool-Operatoren (`AND`, `OR`, `NOT`).
     - Sequentielle Verarbeitung der `pdok.pdk` Bestände.
+    - **Sortierung der Trefferliste** nach Autor, Jahr und Titel – jeweils auf-
+      und absteigend. `Relevanz` bleibt die Vorgabe und entspricht unverändert
+      der Reihenfolge aus der Suche (`sort=relevance|author_asc|author_desc|
+      year_asc|year_desc|title_asc|title_desc`). Datensätze ohne Wert (z. B. ohne
+      Verfasser) stehen immer am Ende. Sortiert wird über die Treffer-ID-Menge
+      vor dem Laden der Datensätze, nicht über den ganzen Bestand.
+    - **„In Treffern suchen“**: ein zweiter Bool-Ausdruck (`AND`/`OR`/`NOT`,
+      auch `UND`/`ODER`/`NICHT` in Großschreibung), der nur auf die *angezeigten*
+      Treffer wirkt. Die Ausgangsmenge sind exakt die auf der Seite stehenden
+      Datensätze (höchstens 1.000, in Anzeigereihenfolge) – eine Verfeinerung
+      kann daher nie Treffer außerhalb der Liste liefern und nie versehentlich
+      den Gesamtbestand durchsuchen. Die Reihenfolge der Ausgangsmenge bleibt
+      erhalten; bei `sort=relevance` also die Relevanzreihenfolge.
+    - Die Herkunft eines Datensatzes steht ausschließlich als HTML-Kommentar
+      (`<!-- source: bibtex -->`) im Quelltext, nicht als sichtbares Badge.
 - **👤 Benutzerverwaltung**:
     - Sichere Registrierung & Login mit **Bcrypt Hashing**.
     - Session-basiertes Rechtesystem inkl. Gastzugang.

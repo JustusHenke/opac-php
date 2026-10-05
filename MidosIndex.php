@@ -46,7 +46,12 @@ class MidosIndex implements OpacLibrary
         }
     }
 
-    public function search(string $term, int $indexNum): array
+    /**
+     * Register-Suche. $indexNum darf neben der Legacy-Nummer auch der
+     * Feldname ('qp','qt','qs','qj','qy') sein – resolveIndex() vereinheitlicht
+     * beides. Der Aufrufer (msuche.php) übergibt den Feldnamen.
+     */
+    public function search(string $term, int|string $indexNum): array
     {
         $field = $this->resolveIndex($indexNum);
         $term = $this->normalize($term);
@@ -154,6 +159,69 @@ class MidosIndex implements OpacLibrary
         return $this->toOpacRecord($docId, $raw, false);
     }
 
+    /**
+     * Sortierschlüssel für eine ID-Menge (Autor/Jahr/Titel).
+     *
+     * Die Offsets kommen aus dem Index; die pdk wird einmal geöffnet und
+     * sequenziell angelesen, statt pro Datensatz neu zu öffnen.
+     *
+     * @param int[] $ids
+     * @return array<int,array{author:string,year:string,title:string}>
+     */
+    public function sortKeys(array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if ($ids === []) {
+            return [];
+        }
+        sort($ids, SORT_NUMERIC);
+
+        $pdkFile = $this->dataDir . DIRECTORY_SEPARATOR . 'pdok.pdk';
+        if (!is_readable($pdkFile)) {
+            return [];
+        }
+
+        try {
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->getDb()->prepare(
+                "SELECT doc_id, byte_offset FROM doc_offsets WHERE doc_id IN ($placeholders)"
+            );
+            $stmt->execute($ids);
+            $offsets = array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+        } catch (Throwable) {
+            return [];
+        }
+        if ($offsets === []) {
+            return [];
+        }
+
+        $fp = fopen($pdkFile, 'rb');
+        if ($fp === false) {
+            return [];
+        }
+        $out = [];
+        foreach ($ids as $id) {
+            if (!isset($offsets[$id])) {
+                continue;
+            }
+            if (fseek($fp, $offsets[$id]) !== 0) {
+                continue;
+            }
+            $line = fgets($fp);
+            if ($line === false) {
+                continue;
+            }
+            $f = parse_pdok_fields(mb_convert_encoding(rtrim($line), 'UTF-8', 'ISO-8859-1'));
+            $out[$id] = [
+                'author' => sort_key((string) ($f['VER'] ?? '')),
+                'year' => trim((string) ($f['ERJ'] ?? ($f['JA'] ?? ''))),
+                'title' => sort_key((string) ($f['HST'] ?? ($f['TI'] ?? ''))),
+            ];
+        }
+        fclose($fp);
+        return $out;
+    }
+
     public function iterateLight(): Traversable
     {
         $pdkFile = $this->dataDir . DIRECTORY_SEPARATOR . 'pdok.pdk';
@@ -202,6 +270,13 @@ class MidosIndex implements OpacLibrary
         ];
     }
 
+    /**
+     * Rohdatensatz als UTF-8.
+     *
+     * pdok.pdk ist ISO-8859-1; ohne die Umwandlung findet parse_pdok_fields()
+     * das Trennzeichen '¿' (2 Byte in UTF-8) nicht und alle Felder blieben
+     * leer. Der Indexaufbau und iterateLight() wandeln ebenfalls hier um.
+     */
     private function readRawRecord(int $docId): ?string
     {
         if ($docId < 1) return null;
@@ -220,7 +295,8 @@ class MidosIndex implements OpacLibrary
         $line = fgets($fp);
         fclose($fp);
 
-        return $line !== false ? rtrim($line) : null;
+        if ($line === false) return null;
+        return mb_convert_encoding(rtrim($line), 'UTF-8', 'ISO-8859-1');
     }
 
     /** MIDOS-Rohtext -> normalisiertes Opac-Record (identischer Vertrag wie BibLibrary::getRecord). */

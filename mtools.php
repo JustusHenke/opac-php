@@ -188,6 +188,7 @@ if ($cart === []): ?>
         }
         ?>
         <div class="result-card">
+            <?= source_comment($rec['source'] ?? null) ?>
             <div class="result-title">
                 <span class="result-number"><?= (int)$ln ?>.</span>
                 <?= htmlspecialchars($rec['title'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>

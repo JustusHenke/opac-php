@@ -17,7 +17,6 @@ $qy = req('qy', ''); // Erscheinungsjahr
 $lib = get_opac_library();
 $totalEntries = $lib->countRecords();
 $isBibSource = $lib instanceof BibLibrary;
-$stockInfo = $isBibSource ? 'BibTeX-Bestand (data/bib)' : 'MIDOS-Bestand (data/midos)';
 
 // Zeitpunkt des letzten Abgleichs und Größe der importierten Quelldatei.
 // Reine Anzeigeangaben – der Import selbst läuft ausschließlich über
@@ -37,7 +36,7 @@ render_app_header(ueb('Suchmaske'));
         <span class="muted"><?= htmlspecialchars(ueb('Bestandsinformationen:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= htmlspecialchars(ueb('Einträge im Bestand:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
         <?= number_format($totalEntries, 0, ',', '.') ?>
-        <!--(<?= htmlspecialchars($stockInfo, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>)-->
+        <?= source_comment($isBibSource ? 'bib' : 'midos') ?>
         <?php if ($lastUpdate !== null): ?>
             &middot; <?= htmlspecialchars(ueb('Letzte Aktualisierung:'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>
             <?= date('d.m.Y H:i', (int) $lastUpdate) ?>

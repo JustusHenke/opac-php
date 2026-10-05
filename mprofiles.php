@@ -50,6 +50,7 @@ if ($action === 'view' && $profileId > 0):
             if (!$rec) continue;
             ?>
             <div class="result-card">
+                <?= source_comment($rec['source'] ?? null) ?>
                 <div class="result-title"><?= (int)$ln ?>. <?= htmlspecialchars($rec['title']) ?></div>
                 <div class="result-meta">
                     <a href="mnote.php?line=<?= (int)$ln ?>"><?= ueb('Notiz') ?></a>

@@ -252,6 +252,210 @@ function str_pos(string $haystack, string $needle): int|false
 }
 
 /**
+ * Quellenangabe eines Datensatzes als HTML-Kommentar statt sichtbarem Badge.
+ *
+ * Die Herkunft (BibTeX-Bestand oder MIDOS-Bestand) bleibt maschinenlesbar –
+ * für Vorlagen, Export und Auswertung –, ohne die Trefferliste optisch zu
+ * belasten. Im öffentlichen Frontend wird die Datenquelle bewusst nicht
+ * angezeigt.
+ */
+function source_comment(?string $source): string
+{
+    $key = match ($source) {
+        'bib' => 'bibtex',
+        'midos' => 'midos',
+        default => 'unknown',
+    };
+    return '<!-- source: ' . $key . ' -->';
+}
+
+/**
+ * Sortierschlüssel: lowercase, Diakritika gefaltet, nur Buchstaben/Ziffern.
+ * Sorgt dafür, dass A–Z weder an Groß-/Kleinschreibung noch an Umlauten hängt.
+ * Die Faltungen entsprechen BibLibrary::normText().
+ */
+function sort_key(?string $s): string
+{
+    $s = str_lower((string) $s);
+    $translit = [
+        'ä' => 'a', 'ö' => 'o', 'ü' => 'u', 'ß' => 'ss',
+        'é' => 'e', 'è' => 'e', 'ê' => 'e', 'á' => 'a', 'à' => 'a', 'â' => 'a',
+        'í' => 'i', 'ó' => 'o', 'ô' => 'o', 'ú' => 'u', 'ñ' => 'n', 'ç' => 'c',
+        'å' => 'a', 'ø' => 'o', 'æ' => 'ae', 'œ' => 'oe', 'ł' => 'l', 'š' => 's',
+        'ž' => 'z', 'č' => 'c', 'ę' => 'e', 'ą' => 'a', 'ć' => 'c', 'ń' => 'n',
+        'ő' => 'o', 'ű' => 'u', 'ý' => 'y', 'ÿ' => 'y', 'đ' => 'd', 'ð' => 'd', 'þ' => 'th',
+    ];
+    $s = strtr($s, $translit);
+    $s = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $s) ?? '';
+    return trim(preg_replace('/\s+/', ' ', $s) ?? '');
+}
+
+/**
+ * Zerlegt einen Bool-Ausdruck (UND/ODER/NOT) in Einzelschritte.
+ *
+ * Es werden die englischen (AND/OR/NOT) wie die deutschen Operatoren
+ * (UND/ODER/NICHT) erkannt – und nur in Großschreibung, damit das im Deutschen
+ * häufige Wort "und" nicht als Operator verschluckt wird.
+ *
+ * @return list<array{op:string,term:string}> op = AND|OR|NOT
+ */
+function parse_boolean(string $expression): array
+{
+    preg_match_all('/"(?:\\\\.|[^\\\\"])*"|\S+/', trim($expression), $matches);
+    $out = [];
+    $op = 'AND';
+    foreach ($matches[0] ?? [] as $tok) {
+        if (strlen($tok) > 1 && $tok[0] === '"' && substr($tok, -1) === '"') {
+            $tok = stripslashes(substr($tok, 1, -1));
+        }
+        $upper = strtoupper($tok);
+        // AND/OR/NOT wie bisher ohne Rücksicht auf Groß-/Kleinschreibung;
+        // die deutschen Entsprechungen zählen bewusst nur in Großschreibung,
+        // damit "und" im Text ein Suchbegriff bleibt und kein Operator wird.
+        if ($upper === 'AND' || $tok === 'UND') { $op = 'AND'; continue; }
+        if ($upper === 'OR' || $tok === 'ODER') { $op = 'OR'; continue; }
+        if ($upper === 'NOT' || $tok === 'NICHT') { $op = 'NOT'; continue; }
+        if ($tok === '') { continue; }
+        $out[] = ['op' => $op, 'term' => $tok];
+        $op = 'AND';
+    }
+    return $out;
+}
+
+/**
+ * Bool-Ausdruck auf eine bereits ermittelte Treffermenge anwenden.
+ *
+ * Bewusst auf Mengen statt auf den Gesamtbestand: das Ergebnis ist immer eine
+ * Teilmenge von $base und behält dessen Reihenfolge (die der Anzeige
+ * entspricht, bei Relevanz also die Trefferreihenfolge). NOT ohne vorherigen
+ * Begriff schließt alles Ausgeschlossene aus der Ausgangsmenge aus.
+ *
+ * @param int[] $base Ausgangsmenge (bestimmt auch die Reihenfolge)
+ * @param list<array{op:string,set:int[]}> $terms
+ * @return int[] Teilmenge von $base
+ */
+function apply_boolean(array $base, array $terms): array
+{
+    $result = null;
+    foreach ($terms as $term) {
+        $set = $term['set'] ?? [];
+        switch ($term['op'] ?? 'AND') {
+            case 'NOT':
+                $result = $result === null
+                    ? array_diff($base, $set)
+                    : array_diff($result, $set);
+                break;
+            case 'OR':
+                $result = $result === null
+                    ? $set
+                    : array_unique(array_merge($result, $set));
+                break;
+            default: // AND
+                $result = $result === null
+                    ? $set
+                    : array_intersect($result, $set);
+        }
+    }
+    if ($result === null) {
+        return [];
+    }
+    // Ausgabe in der Reihenfolge der Ausgangsmenge (array_* erhält sie).
+    return array_values(array_intersect($base, $result));
+}
+
+/**
+ * "in Treffern suchen": Bool-Ausdruck auf die angezeigte Trefferliste anwenden.
+ * Der Ausdruck wird ausschließlich gegen $base ausgewertet – eine Suche in
+ * Treffern kann nie versehentlich den gesamten Bestand durchsuchen.
+ *
+ * @param int[] $base Datensatz-IDs der angezeigten Treffer
+ * @return int[] Teilmenge von $base
+ */
+function refine_hits(OpacLibrary $lib, array $base, string $expression, int|string $field): array
+{
+    $base = array_map('intval', $base);
+    if ($base === [] || trim($expression) === '') {
+        return [];
+    }
+    $terms = [];
+    foreach (parse_boolean($expression) as $step) {
+        // Der Gesamttreffer wird auf die Ausgangsmenge beschnitten; nur so
+        // zählt der einzelne Begriff tatsächlich "innerhalb der Treffer".
+        $terms[] = [
+            'op' => $step['op'],
+            'set' => array_intersect($base, $lib->searchBoolean($step['term'], $field)),
+        ];
+    }
+    if ($terms === []) {
+        return $base;
+    }
+    return apply_boolean($base, $terms);
+}
+
+/**
+ * Treffer-IDs nach Autor, Jahr oder Titel sortieren.
+ *
+ * 'relevance' (Vorgabe) bleibt unangetastet: die Reihenfolge kommt dann aus
+ * der Suche selbst und wird nicht überschrieben.
+ *
+ * @param int[] $ids
+ * @param array<int,array{author:string,year:string,title:string}> $keys
+ * @return int[]
+ */
+function sort_hit_ids(array $ids, array $keys, string $sort): array
+{
+    if ($sort === '' || $sort === 'relevance') {
+        return $ids;
+    }
+    $field = match (true) {
+        str_starts_with($sort, 'author') => 'author',
+        str_starts_with($sort, 'year') => 'year',
+        default => 'title',
+    };
+    $desc = str_ends_with($sort, '_desc');
+
+    usort($ids, static function (int $a, int $b) use ($keys, $field, $desc): int {
+        $ka = $keys[$a][$field] ?? '';
+        $kb = $keys[$b][$field] ?? '';
+        $kaMissing = ($ka === '');
+        $kbMissing = ($kb === '');
+        // Datensätze ohne Wert (z. B. ohne Verfasser) stehen immer am Ende –
+        // in beide Richtungen, sonst eröffnen sie die Liste sinnlos.
+        if ($kaMissing !== $kbMissing) {
+            return $kaMissing ? 1 : -1;
+        }
+        if ($field === 'year' && !$kaMissing) {
+            $cmp = ((int) $ka) <=> ((int) $kb);
+        } else {
+            $cmp = strcmp($ka, $kb);
+        }
+        if ($cmp !== 0) {
+            return $desc ? -$cmp : $cmp;
+        }
+        return $a <=> $b; // stabil: gleiche Werte behalten die Bestandsreihenfolge
+    });
+    return $ids;
+}
+
+/**
+ * Such-URL, die übergebene Parameter (leere werden weggelassen) mitnimmt.
+ * Basis für Sortier- und Verfeinerungslinks, die den Suchauftrag nicht verlieren.
+ *
+ * @param array<string,string|null> $params
+ */
+function search_link(array $params): string
+{
+    $clean = [];
+    foreach ($params as $key => $value) {
+        if ($value === null || $value === '') {
+            continue;
+        }
+        $clean[$key] = $value;
+    }
+    return $clean === [] ? 'msuche.php' : 'msuche.php?' . http_build_query($clean);
+}
+
+/**
  * Einfacher HTML-Kopf.
  */
 function render_header(string $title): void
@@ -716,6 +920,17 @@ interface OpacLibrary
 
     /** Record ohne HTML-Erzeugung (für Filter): id, title, alltext, abstract, ... */
     public function getRecordLight(int $docId): ?array;
+
+    /**
+     * Sortierschlüssel (Autor, Jahr, Titel) für eine Menge von Datensatz-IDs.
+     * Bewusst ohne HTML und ohne Datensatz-Objekte: eine Sortierung darf nicht
+     * den ganzen Bestand laden, sonst wird sie bei großen Beständen zur
+     * Belastung. Fehlende Werte kommen als leere Zeichenkette zurück.
+     *
+     * @param int[] $ids
+     * @return array<int,array{author:string,year:string,title:string}> id => Schlüssel
+     */
+    public function sortKeys(array $ids): array;
 
     /** Leichte Iteration über den Bestand: ['id','title','alltext','abstract'] */
     public function iterateLight(): Traversable;
