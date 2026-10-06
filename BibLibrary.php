@@ -32,6 +32,15 @@ class BibLibrary implements OpacLibrary
      */
     private const IMPORT_LOG_MAX_DETAIL = 20000;
 
+    /**
+     * Version der Fingerprint-Formel (siehe fingerprint()). Ändert sich die
+     * Dublettenprüfung, wird dieser Wert erhöht; der nächste Import rechnet
+     * dann die gespeicherten Fingerprints des Bestands einmalig auf die neue
+     * Formel um (migrateFingerprints()) – sonst würden sämtliche Bestände als
+     * neu erkannt und doppelt eingefügt.
+     */
+    private const FP_VERSION = '2';
+
     private string $bibDir;
     private ?PDO $db = null;
 
@@ -253,6 +262,12 @@ class BibLibrary implements OpacLibrary
             if ($forceFull) {
                 $db->exec('DELETE FROM entries');
             }
+
+            // Fingerprint-Formel geändert? Einmalig den Bestand umrechnen, BEVOR
+            // die Vergleichstabelle geladen wird – sonst würde der Abgleich alle
+            // Alt-Fingerprints als neue Einträge ansehen und den Bestand doppelt
+            // einfügen.
+            $this->migrateFingerprints($logLines);
 
             // Bestehende Fingerprints laden
             $byFp = [];
@@ -573,7 +588,105 @@ class BibLibrary implements OpacLibrary
         return '';
     }
 
-    /** Wiedererkennung über Importläufe hinweg: DOI wenn vorhanden, sonst Titel+Jahr+Erstautor. */
+    /**
+     * Einmalige Neuberechnung aller gespeicherten Fingerprints, wenn sich die
+     * Fingerprint-Formel geändert hat (FP_VERSION). Läuft innerhalb der
+     * Import-Transaktion, direkt vor dem Laden der Vergleichstabelle.
+     *
+     * Kollidieren dabei Bestandszeilen unter den neuen (schärferen) Kriterien,
+     * handelt es sich um echte Dubletten: der ältere Datensatz (kleinste ID)
+     * bleibt, die übrigen werden entfernt und protokolliert.
+     *
+     * @param string[] $logLines Import-Log, wird per Referenz ergänzt
+     */
+    private function migrateFingerprints(array &$logLines): void
+    {
+        if ($this->getMeta('fingerprint_version') === self::FP_VERSION) {
+            return;
+        }
+
+        $db = $this->getDb();
+        $upd = $db->prepare('UPDATE entries SET fingerprint = ? WHERE id = ?');
+        $del = $db->prepare('DELETE FROM entries WHERE id = ?');
+        $sel = $db->prepare('SELECT id, fingerprint, citekey, entry_type, title, year, fields_json
+                               FROM entries WHERE id = ?');
+
+        // IDs vorab lesen (klein): vermeidet fetch-while-write auf derselben
+        // Verbindung – SQLite garantiert das nicht zuverlässig.
+        $ids = array_map('intval', array_column(
+            $db->query('SELECT id FROM entries ORDER BY id')->fetchAll(PDO::FETCH_ASSOC),
+            'id'
+        ));
+
+        $seen = [];
+        $recomputed = 0;
+        $collisions = [];
+        foreach ($ids as $id) {
+            $sel->execute([$id]);
+            $row = $sel->fetch(PDO::FETCH_ASSOC);
+            $sel->closeCursor();
+            if ($row === false) {
+                continue;
+            }
+            $e = [
+                'citekey' => (string) ($row['citekey'] ?? ''),
+                'type' => (string) ($row['entry_type'] ?? ''),
+                'fields' => json_decode((string) ($row['fields_json'] ?? ''), true) ?: [],
+            ];
+            $newFp = $this->fingerprint($e);
+            if (isset($seen[$newFp])) {
+                // Echte Dublette nach den neuen Kriterien -> älteren Datensatz behalten.
+                $del->execute([$id]);
+                if (count($collisions) < self::IMPORT_LOG_MAX_DETAIL) {
+                    $collisions[] = sprintf(
+                        '    %d. id=%d | Typ: %s | Titel: %s | Jahr: %s | Citekey: %s',
+                        count($collisions) + 1,
+                        $id,
+                        $this->logSafe((string) ($row['entry_type'] ?? ''), 40) ?: '-',
+                        $this->logSafe((string) ($row['title'] ?? ''), 160) ?: '(ohne Titel)',
+                        $this->logSafe((string) ($row['year'] ?? ''), 20) ?: '-',
+                        $this->logSafe((string) ($row['citekey'] ?? ''), 80) ?: '-'
+                    );
+                }
+                continue;
+            }
+            $seen[$newFp] = true;
+            if ($newFp !== $row['fingerprint']) {
+                $upd->execute([$newFp, $id]);
+                $recomputed++;
+            }
+        }
+
+        $this->setMeta('fingerprint_version', self::FP_VERSION);
+        $logLines[] = sprintf(
+            '[%s] Dublettenformel aktualisiert (Version %s): Fingerprints neu berechnet für %s Datensätze, %s Bestands-Dubletten entfernt.',
+            date('Y-m-d H:i:s'),
+            self::FP_VERSION,
+            number_format($recomputed, 0, ',', '.'),
+            number_format(count($collisions), 0, ',', '.')
+        );
+        $logLines = array_merge($logLines, $collisions);
+        if (count($collisions) >= self::IMPORT_LOG_MAX_DETAIL) {
+            $logLines[] = '    … weitere Kollisionen nicht einzeln aufgeführt (Log-Obergrenze).';
+        }
+        if ($collisions === []) {
+            $logLines[] = '    (keine Kollisionen – der Bestand enthielt keine Dubletten nach den neuen Kriterien)';
+        }
+    }
+
+    /**
+     * Wiedererkennung über Importläufe hinweg: DOI wenn vorhanden, sonst
+     * Eintragstyp + Titel + Jahr + Erstautor + Container.
+     *
+     * Eintragstyp und Container (Zeitschrift, Sammelband) gehören zur Identität:
+     * Ein Buch, ein Buchteil (@incollection/@inbook) und ein Zeitschriftenaufsatz
+     * können denselben Titel, dasselbe Jahr und denselben Erstautor haben – das
+     * sind dann verschiedene Werke und keine Dubletten.
+     *
+     * Formelversion: FP_VERSION. Bei Änderungen an dieser Methode die Version
+     * erhöhen – der Bestand wird dann beim nächsten Import einmalig neu
+     * gerechnet (migrateFingerprints()).
+     */
     private function fingerprint(array $e): string
     {
         $f = $e['fields'];
@@ -595,7 +708,21 @@ class BibLibrary implements OpacLibrary
                 $surname = $parts === [] ? '' : (string) end($parts);
             }
         }
-        return 't:' . sha1($title . '|' . $year . '|' . $this->normalizeTerm($surname));
+        $container = '';
+        foreach (['journaltitle', 'journal', 'booktitle'] as $cKey) {
+            $cVal = trim($f[$cKey] ?? '');
+            if ($cVal !== '') {
+                $container = $cVal;
+                break;
+            }
+        }
+        return 't:' . sha1(implode('|', [
+            $title,
+            $year,
+            $this->normalizeTerm($surname),
+            strtolower(trim((string) ($e['type'] ?? ''))),
+            $this->normText($container),
+        ]));
     }
 
     private function contentHash(array $e): string
