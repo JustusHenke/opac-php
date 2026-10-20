@@ -50,8 +50,13 @@ class MidosIndex implements OpacLibrary
      * Register-Suche. $indexNum darf neben der Legacy-Nummer auch der
      * Feldname ('qp','qt','qs','qj','qy') sein – resolveIndex() vereinheitlicht
      * beides. Der Aufrufer (msuche.php) übergibt den Feldnamen.
+     *
+     * $exact = true (Anführungszeichen) verlangt eine Wortgrenze: der Eintrag
+     * muss mit dem Begriff beginnen und der Begriff darf nicht mitten in einem
+     * längeren Wort stehen – so trifft "Henke" nicht mehr auf "Schenker".
+     * Ohne $exact bleibt es beim Präfixtreffer.
      */
-    public function search(string $term, int|string $indexNum): array
+    public function search(string $term, int|string $indexNum, bool $exact = false): array
     {
         $field = $this->resolveIndex($indexNum);
         $term = $this->normalize($term);
@@ -59,13 +64,24 @@ class MidosIndex implements OpacLibrary
         $db = $this->getDb();
         // Index uses prefix match in legacy? "TERM" matches "TERMIN".
         // Let's use LIKE 'TERM%' for compatibility.
-        $stmt = $db->prepare("SELECT DISTINCT doc_id FROM search_index WHERE field = ? AND term LIKE ?");
+        $stmt = $db->prepare("SELECT DISTINCT doc_id, term FROM search_index WHERE field = ? AND term LIKE ?");
         $stmt->execute([$field, $term . '%']);
-        
-        return $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+        $ids = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ($exact) {
+                // Wortgrenze: nach dem Begriff darf kein Wortzeichen folgen.
+                $t = (string) $row['term'];
+                if (preg_match('/' . preg_quote($term, '/') . '(?![A-Za-z0-9])/', $t) !== 1) {
+                    continue;
+                }
+            }
+            $ids[] = (int) $row['doc_id'];
+        }
+        return array_values(array_unique($ids));
     }
 
-    public function searchBoolean(string $query, int|string $indexNum): array
+    public function searchBoolean(string $query, int|string $indexNum, bool $exact = false): array
     {
         preg_match_all('/"(?:\\\\.|[^\\\\"])*"|\S+/', trim($query), $matches);
         $tokens = $matches[0] ?? [];
@@ -76,8 +92,11 @@ class MidosIndex implements OpacLibrary
         $negateNext = false;
 
         foreach ($tokens as $tok) {
-            if (substr($tok, 0, 1) === '"' && substr($tok, -1) === '"') {
+            // Anführungszeichen = wortgenau; $exact erzwingt dies zusätzlich.
+            $termExact = $exact;
+            if (strlen($tok) > 1 && $tok[0] === '"' && substr($tok, -1) === '"') {
                 $tok = stripslashes(substr($tok, 1, -1));
+                $termExact = true;
             }
 
             $upper = strtoupper($tok);
@@ -85,7 +104,7 @@ class MidosIndex implements OpacLibrary
             if ($upper === 'OR') { $op = 'OR'; continue; }
             if ($upper === 'NOT') { $negateNext = true; continue; }
 
-            $ids = $this->search($tok, $indexNum); 
+            $ids = $this->search($tok, $indexNum, $termExact); 
             
             if ($negateNext) {
                 if ($result !== null) $result = array_diff($result, $ids);

@@ -340,7 +340,12 @@ function sort_key(?string $s): string
  * (UND/ODER/NICHT) erkannt – und nur in Großschreibung, damit das im Deutschen
  * häufige Wort "und" nicht als Operator verschluckt wird.
  *
- * @return list<array{op:string,term:string}> op = AND|OR|NOT
+ * Ein in Anführungszeichen gesetzter Begriff bedeutet "wortgenau" (exact):
+ * gesucht wird dann nach dem ganzen Begriff als eigenständiger Bestandteil
+ * eines Feldwerts, nicht als beliebiger Teilstring. Das Flag wird mitgeliefert,
+ * damit refine_hits() die Information über searchBoolean() weiterreichen kann.
+ *
+ * @return list<array{op:string,term:string,exact:bool}> op = AND|OR|NOT
  */
 function parse_boolean(string $expression): array
 {
@@ -348,8 +353,11 @@ function parse_boolean(string $expression): array
     $out = [];
     $op = 'AND';
     foreach ($matches[0] ?? [] as $tok) {
+        // Anführungszeichen = wortgenaue Suche (exact).
+        $exact = false;
         if (strlen($tok) > 1 && $tok[0] === '"' && substr($tok, -1) === '"') {
             $tok = stripslashes(substr($tok, 1, -1));
+            $exact = true;
         }
         $upper = strtoupper($tok);
         // AND/OR/NOT wie bisher ohne Rücksicht auf Groß-/Kleinschreibung;
@@ -359,7 +367,7 @@ function parse_boolean(string $expression): array
         if ($upper === 'OR' || $tok === 'ODER') { $op = 'OR'; continue; }
         if ($upper === 'NOT' || $tok === 'NICHT') { $op = 'NOT'; continue; }
         if ($tok === '') { continue; }
-        $out[] = ['op' => $op, 'term' => $tok];
+        $out[] = ['op' => $op, 'term' => $tok, 'exact' => $exact];
         $op = 'AND';
     }
     return $out;
@@ -424,9 +432,14 @@ function refine_hits(OpacLibrary $lib, array $base, string $expression, int|stri
     foreach (parse_boolean($expression) as $step) {
         // Der Gesamttreffer wird auf die Ausgangsmenge beschnitten; nur so
         // zählt der einzelne Begriff tatsächlich "innerhalb der Treffer".
+        // "exact" (aus Anführungszeichen) wird durchgereicht, damit ein
+        // wortgenauer Begriff auch hier wortgenau bleibt.
         $terms[] = [
             'op' => $step['op'],
-            'set' => array_intersect($base, $lib->searchBoolean($step['term'], $field)),
+            'set' => array_intersect(
+                $base,
+                $lib->searchBoolean($step['term'], $field, (bool) ($step['exact'] ?? false))
+            ),
         ];
     }
     if ($terms === []) {
@@ -943,9 +956,13 @@ interface OpacLibrary
     /**
      * Bool-Suche (AND/OR/NOT) in einem Feld.
      * $index: Feldname ('qp','qt','qs','qj','qy','qa','q') oder Legacy-Nummer (1,2,4,6,7).
+     * $exact: true = alle Begriffe wortgenau behandeln, auch ohne Anführungszeichen
+     *         (für Aufrufer, die den Ausdruck bereits tokenisiert haben, z. B.
+     *         refine_hits()). Ein im Ausdruck mitgegebenes Anführungszeichen wirkt
+     *         unabhängig davon und setzt "exact" für diesen Begriff.
      * Rückgabe: Liste von doc-IDs.
      */
-    public function searchBoolean(string $query, int|string $index): array;
+    public function searchBoolean(string $query, int|string $index, bool $exact = false): array;
 
     /** Terme eines Registers für A-Z-Browsing: [['term'=>..,'count'=>..], ...] */
     public function getTerms(int|string $index, string $prefix, int $limit = 100): array;

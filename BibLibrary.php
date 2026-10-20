@@ -753,7 +753,7 @@ class BibLibrary implements OpacLibrary
 
     // ================================================================ Suche (OpacLibrary)
 
-    public function searchBoolean(string $query, int|string $index): array
+    public function searchBoolean(string $query, int|string $index, bool $exact = false): array
     {
         $field = is_int($index) ? $this->numToKey($index) : $index;
 
@@ -768,15 +768,19 @@ class BibLibrary implements OpacLibrary
         $negateNext = false;
 
         foreach ($tokens as $tok) {
-            if (substr($tok, 0, 1) === '"' && substr($tok, -1) === '"') {
+            // Anführungszeichen im Ausdruck = wortgenau; $exact erzwingt dies
+            // zusätzlich für Aufrufer, die den Ausdruck schon tokenisiert haben.
+            $termExact = $exact;
+            if (strlen($tok) > 1 && $tok[0] === '"' && substr($tok, -1) === '"') {
                 $tok = stripslashes(substr($tok, 1, -1));
+                $termExact = true;
             }
             $upper = strtoupper($tok);
             if ($upper === 'AND') { $op = 'AND'; continue; }
             if ($upper === 'OR') { $op = 'OR'; continue; }
             if ($upper === 'NOT') { $negateNext = true; continue; }
 
-            $ids = $this->idsForTerm($tok, $field);
+            $ids = $this->idsForTerm($tok, $field, $termExact);
 
             if ($negateNext) {
                 if ($result !== null) {
@@ -797,8 +801,21 @@ class BibLibrary implements OpacLibrary
         return $result ?? [];
     }
 
-    /** ID-Set für einen Suchbegriff in einem Feld. */
-    private function idsForTerm(string $term, string $field): array
+    /**
+     * ID-Set für einen Suchbegriff in einem Feld.
+     *
+     * $exact = false (Standard): Teilstring-Suche. Der Begriff trifft auch
+     *   mitten in einem Wort – "Henke" findet so auch "Schenker".
+     * $exact = true (Anführungszeichen): wortgenaue Suche. Der Begriff muss als
+     *   eigenständiges Wort vorkommen; "Henke" trifft dann "Henke, Justus",
+     *   aber nicht "Schenker".
+     *
+     * Die Vorauswahl erfolgt in beiden Fällen über LIKE (nutzt den Index), die
+     * Wortgrenzen-Prüfung danach in PHP – SQLite kennt im LIKE keine regulären
+     * Ausdrücke, und ein ungefiltertes LIKE würde bei exact zu viele Datensätze
+     * liefern.
+     */
+    private function idsForTerm(string $term, string $field, bool $exact = false): array
     {
         $term = trim($term);
         if ($term === '') {
@@ -806,36 +823,85 @@ class BibLibrary implements OpacLibrary
         }
         $db = $this->getDb();
         $norm = $this->normalizeTerm($term);
+
         switch ($field) {
             case 'qt':
-                $stmt = $db->prepare("SELECT DISTINCT doc_id FROM search_index WHERE field = 'qt' AND term LIKE ?");
+                // Titelwörter stehen einzeln im search_index – dort ist der
+                // Vergleich bereits wortgenau (Präfixtreffer wie "Digitalisier"
+                // bleiben Teilwortsuche, exact erzwingt zusätzlich die Wortgrenze).
+                $stmt = $db->prepare("SELECT doc_id, term FROM search_index WHERE field = 'qt' AND term LIKE ?");
                 $stmt->execute([$norm . '%']);
-                return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+                $ids = [];
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    if ($exact && !$this->wordMatches((string) $row['term'], $norm)) {
+                        continue;
+                    }
+                    $ids[(int) $row['doc_id']] = true;
+                }
+                return array_map('intval', array_keys($ids));
+
             case 'qp':
-                $stmt = $db->prepare('SELECT id FROM entries WHERE authors_norm LIKE ?');
-                $stmt->execute(['%' . $norm . '%']);
-                return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+                return $this->idsByColumn($db, 'authors_norm', $norm, $exact);
             case 'qj':
-                $stmt = $db->prepare("SELECT id FROM entries WHERE journal_norm != '' AND journal_norm LIKE ?");
-                $stmt->execute(['%' . $norm . '%']);
-                return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+                return $this->idsByColumn($db, 'journal_norm', $norm, $exact, true);
             case 'qs':
-                $stmt = $db->prepare("SELECT id FROM entries WHERE keywords_norm != '' AND keywords_norm LIKE ?");
-                $stmt->execute(['%' . $norm . '%']);
-                return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+                return $this->idsByColumn($db, 'keywords_norm', $norm, $exact, true);
+            case 'qa':
+                return $this->idsByColumn($db, 'abstract_norm', $norm, $exact, true);
             case 'qy':
                 $stmt = $db->prepare("SELECT id FROM entries WHERE year != '' AND year LIKE ?");
                 $stmt->execute([$term . '%']);
                 return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
-            case 'qa':
-                $stmt = $db->prepare("SELECT id FROM entries WHERE abstract_norm != '' AND abstract_norm LIKE ?");
-                $stmt->execute(['%' . $norm . '%']);
-                return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
             default: // Freitext 'q'
-                $stmt = $db->prepare('SELECT id FROM entries WHERE alltext_norm LIKE ?');
-                $stmt->execute(['%' . $norm . '%']);
-                return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+                return $this->idsByColumn($db, 'alltext_norm', $norm, $exact);
         }
+    }
+
+    /**
+     * Datensatz-IDs, deren Spalte $column den (normalisierten) Begriff $norm
+     * enthält. Ohne $exact als Teilstring, mit $exact nur als eigenständiges
+     * Wort. $onlyFilled blendet leere Spaltenwerte aus (wie bisher bei
+     * Quelle/Schlagwort/Abstract), damit '' nicht überall trifft.
+     *
+     * @return int[]
+     */
+    private function idsByColumn(PDO $db, string $column, string $norm, bool $exact, bool $onlyFilled = false): array
+    {
+        $sql = 'SELECT id, ' . $column . ' AS val FROM entries WHERE ' . $column . ' LIKE ?';
+        if ($onlyFilled) {
+            $sql .= " AND " . $column . " != ''";
+        }
+        $stmt = $db->prepare($sql);
+        $stmt->execute(['%' . $norm . '%']);
+
+        $ids = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ($exact && !$this->wordMatches((string) $row['val'], $norm)) {
+                continue;
+            }
+            $ids[] = (int) $row['id'];
+        }
+        return $ids;
+    }
+
+    /**
+     * Prüft, ob $needle in $haystack als eigenständiges Wort vorkommt.
+     *
+     * Beide Strings können unterschiedlich geschrieben sein: Suchbegriffe
+     * kommen normalisiert in Großbuchstaben (normalizeTerm), Textspalten wie
+     * alltext_norm aber in Kleinschreibung (normText). Der Vergleich läuft
+     * daher case-insensitiv (/i). Wortzeichen sind A–Z und Ziffern; alles
+     * andere (Leerzeichen, Komma, Bindestrich, |, Klammern …) gilt als Grenze.
+     * So trifft "Henke" auf "HENKE, JUSTUS" und auf "justus henke", aber nicht
+     * auf "schenker" oder "hochschulforumdigitalisierung".
+     */
+    private function wordMatches(string $haystack, string $needle): bool
+    {
+        if ($needle === '') {
+            return false;
+        }
+        $pattern = '/(?<![A-Za-z0-9])' . preg_quote($needle, '/') . '(?![A-Za-z0-9])/i';
+        return preg_match($pattern, $haystack) === 1;
     }
 
     // ---- A-Z Browsing / Term-Listen ----

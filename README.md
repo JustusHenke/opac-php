@@ -13,6 +13,12 @@ Dies ist die moderne PHP-Portierung des ursprünglich Perl-basierten **MIDOS-WEB
 - **🔍 Intelligente Suche**:
     - Mehrfeld-Suche über `Titel`, `Abstract`, `Quelle` und `Personen`.
     - Volle Unterstützung von Bool-Operatoren (`AND`, `OR`, `NOT`).
+    - **Wortgenaue Suche mit Anführungszeichen**: Ein Begriff in doppelten
+      Anführungszeichen (`qp="Henke"`) wird nur als eigenständiges Wort
+      gefunden – ohne Anführungszeichen bleibt es bei der Teilstring-Suche.
+      Damit trennt `"Henke"` sauber von „Schenker", `"Medium"` von „Medien"
+      und `"Digitalisierung"` von „hochschulforumdigitalisierung". Wirkt in
+      allen Feldern, in der API ebenso wie in „In Treffern suchen".
     - Sequentielle Verarbeitung der `pdok.pdk` Bestände.
     - **Sortierung der Trefferliste** nach Autor, Jahr und Titel – jeweils auf-
       und absteigend. `Relevanz` bleibt die Vorgabe und entspricht unverändert
@@ -137,6 +143,18 @@ Schlüssel generieren: `openssl rand -hex 24`.
 `qp` = Person(en)/Verfasser, `qj` = Zeitschrift/Quelle, `qs` = Schlagwort, `qy` = Jahr.
 Alle gesetzten Felder werden per AND kombiniert; ein gesetztes Feld ohne Treffer
 leert das Gesamtergebnis.
+
+**Teilstring vs. wortgenau**: Ohne Anführungszeichen sucht ein Begriff als
+Teilstring (auch mitten im Wort), mit Anführungszeichen wortgenau:
+
+| Anfrage | Bedeutung | Beispiel |
+| --- | --- | --- |
+| `qp=Henke` | Teilstring | findet auch „Schenker" |
+| `qp="Henke"` | wortgenau (URL-kodiert: `%22Henke%22`) | nur „Henke" |
+| `q="Digitalisierung"` | ganzes Wort | ohne „hochschulforumdigitalisierung" |
+
+Die Anführungszeichen wirken in allen Feldern; innerhalb eines Feldes lassen
+sie sich mit `AND`/`OR`/`NOT` kombinieren, z. B. `qp="Henke" AND qy=2022`.
 
 **Sortierung** (`sort`): `relevance` (Vorgabe), `author_asc`, `author_desc`,
 `year_asc`, `year_desc`, `title_asc`, `title_desc`.
