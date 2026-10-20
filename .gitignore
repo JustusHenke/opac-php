@@ -24,4 +24,4 @@ Thumbs.db
 *.swp
 *.swo
 AGENTS.md
-.private/*
+.private

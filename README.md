@@ -104,8 +104,15 @@ Der Bestand wird aus BibTeX-Dateien im Verzeichnis `data/bib/` aufgebaut:
 
 Der OPAC stellt eine schlanke, **rein lesende** JSON-API bereit. Damit lassen
 sich Bestandsabfragen fernab des HTML-Frontends ausführen – aus Skripten, R,
-Python, cron-Jobs oder eigenen Anwendungen. Alle Antworten sind UTF-8-JSON mit
-dem einheitlichen Umschlag:
+Python, cron-Jobs oder eigenen Anwendungen.
+
+> **Kurzanleitung im Web:** Die Seite `mapi.php` erklärt die Schnittstelle im
+> OPAC selbst und ist über den Menüpunkt **API** erreichbar (auch ohne
+> Anmeldung). Die dort angezeigte Basisadresse wird dynamisch aus der laufenden
+> Anfrage ermittelt (HTTP/HTTPS, Unterverzeichnis, Reverse-Proxy); über die
+> Umgebungsvariable `OPAC_BASE_URL` lässt sie sich fest vorgeben.
+
+Alle Antworten sind UTF-8-JSON mit dem einheitlichen Umschlag:
 
 ```json
 { "ok": true, "data": { … }, "meta": { … } }

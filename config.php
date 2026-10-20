@@ -679,6 +679,12 @@ function render_app_header(string $pageTitle): void
             "</a>" .
             "\n";
     }
+    // Der API-Zugang ist für alle offen – der Menüpunkt erscheint daher auch
+    // ohne Anmeldung (anders als Suche, Index, Sammlungen und Warenkorb).
+    echo '    <a class="nav-link" href="mapi.php">' .
+        htmlspecialchars(ueb("API")) .
+        "</a>" .
+        "\n";
     echo '    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Design wechseln" title="Helles/Dunkles Design">🌓</button>' .
         "\n";
     if ($username) {
@@ -1181,4 +1187,66 @@ function opac_record_public(array $rec): array
 {
     unset($rec['html'], $rec['alltext']);
     return $rec;
+}
+
+/**
+ * Basis-URL des OPAC (Verzeichnis, in dem die Skripte liegen), dynamisch aus der
+ * laufenden Anfrage ermittelt – damit die API-Dokumentation auch dann stimmt,
+ * wenn der OPAC in einem Unterverzeichnis (z. B. /opac/) oder hinter einem
+ * Reverse-Proxy mit anderem Schema läuft.
+ *
+ * Ergebnis ohne abschließenden Schrägstrich, z. B. "https://hof.uni-halle.de/opac".
+ * Kann per Umgebungsvariable OPAC_BASE_URL fest vorgegeben werden (z. B. wenn
+ * Host/Schema hinter dem Proxy nicht zuverlässig ankommen).
+ */
+function opac_base_url(): string
+{
+    // Feste Vorgabe hat Vorrang (OPAC_BASE_URL in .env oder Umgebung).
+    $configured = (string) (getenv("OPAC_BASE_URL") ?: "");
+    if ($configured === "" && isset($_ENV["OPAC_BASE_URL"])) {
+        $configured = (string) $_ENV["OPAC_BASE_URL"];
+    }
+    if ($configured !== "") {
+        return rtrim($configured, "/");
+    }
+
+    // Schema: direkt, sonst über Proxy-Header, sonst Standard nach HTTPS-Flag.
+    $https = (!empty($_SERVER['HTTPS']) && strtolower((string) $_SERVER['HTTPS']) !== 'off')
+        || (($_SERVER['SERVER_PORT'] ?? '') === '443');
+    $scheme = $https ? 'https' : 'http';
+    if (!empty($_SERVER['HTTP_X_FORWARDED_PROTO'])) {
+        // Erster Wert der (ggf. kommagetrennten) Proxy-Kette.
+        $proto = strtolower(trim(explode(',', (string) $_SERVER['HTTP_X_FORWARDED_PROTO'])[0]));
+        if ($proto === 'https' || $proto === 'http') {
+            $scheme = $proto;
+        }
+    }
+
+    // Host: bevorzugt X-Forwarded-Host (Proxy), sonst Host-Header.
+    $host = (string) ($_SERVER['HTTP_X_FORWARDED_HOST'] ?? ($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host !== '') {
+        $host = trim(explode(',', $host)[0]);
+    }
+    if ($host === '') {
+        // Fallback ohne Request-Kontext (z. B. CLI): nur der Pfad.
+        $host = (string) ($_SERVER['SERVER_NAME'] ?? '');
+    }
+
+    // Verzeichnis des aktuellen Skripts (ohne Dateinamen).
+    $scriptDir = str_replace('\\', '/', dirname((string) ($_SERVER['SCRIPT_NAME'] ?? '')));
+    if ($scriptDir === '/' || $scriptDir === '.') {
+        $scriptDir = '';
+    }
+
+    $base = ($host !== '' ? $scheme . '://' . $host : '') . $scriptDir;
+    return rtrim($base, '/');
+}
+
+/**
+ * Vollständige URL der API (api.php) auf Basis von opac_base_url().
+ */
+function opac_api_url(): string
+{
+    $base = opac_base_url();
+    return ($base !== '' ? $base : '') . '/api.php';
 }
