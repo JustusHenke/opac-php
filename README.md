@@ -39,6 +39,9 @@ Dies ist die moderne PHP-Portierung des ursprünglich Perl-basierten **MIDOS-WEB
     - **Notizen**: Persönliche Annotationen direkt am Datensatz.
     - **Export**: BibTeX-Unterstützung für wissenschaftliche Weiterverarbeitung.
 - **📑 Index-Browsing**: Komfortables A-Z Browsing durch Personen-, Titel- und Schlagwortregister.
+- **🔌 JSON-API**: Rein lesende Fernabfrage des Bestands über `api.php`
+    (Suche, Datensatz, Register, Statistik) – ohne das Frontend, optional per
+    API-Key geschützt. Siehe [JSON-API](#-json-api-apiphp).
 
 ## 📦 Datenquelle: BibTeX (statt MIDOS)
 
@@ -90,6 +93,110 @@ Der Bestand wird aus BibTeX-Dateien im Verzeichnis `data/bib/` aufgebaut:
   deaktiviert (fail-closed). CLI (`import_bibtex.php`) gilt als serverseitig vertrauenswürdig
   und benötigt kein Secret.
 - Der Import ist gegen parallele Abgleiche gesichert (Sperrdatei `data/bib/sync.lock`).
+
+## 🔌 JSON-API (`api.php`)
+
+Der OPAC stellt eine schlanke, **rein lesende** JSON-API bereit. Damit lassen
+sich Bestandsabfragen fernab des HTML-Frontends ausführen – aus Skripten, R,
+Python, cron-Jobs oder eigenen Anwendungen. Alle Antworten sind UTF-8-JSON mit
+dem einheitlichen Umschlag:
+
+```json
+{ "ok": true, "data": { … }, "meta": { … } }
+```
+
+Fehler liefern `{"ok":false,"error":{"code":…,"message":…}}` und einen passenden
+HTTP-Status (400/401/404/405/500). Die API ist **nur lesend**: sie ändert keine
+Datensätze und startet keine Importe. Bestandsänderungen laufen weiterhin über
+`mimport.php` bzw. `import_bibtex.php` (CLI).
+
+### Authentifizierung (optional)
+
+Ist `OPAC_API_KEY` konfiguriert (`.env`, Vorlage `.env.example`, oder als
+Umgebungsvariable), muss der Schlüssel bei **jeder** Anfrage mitgeliefert
+werden – sonst antwortet die API mit HTTP 401. Übergabe (eine Variante genügt):
+
+- Header `X-API-Key: <key>`
+- Header `Authorization: Bearer <key>`
+- Query-Parameter `?key=<key>`
+
+Ist **kein** Schlüssel gesetzt, ist die API offen (fail-open, nur lesend).
+Schlüssel generieren: `openssl rand -hex 24`.
+
+### Endpunkte
+
+| Aktion | Parameter | Beschreibung |
+| --- | --- | --- |
+| `search` | `q`, `qt`, `qa`, `qp`, `qj`, `qs`, `qy`, `sort`, `limit`, `offset`, `in`, `inf` | Mehrfeld-Suche (AND-Verknüpfung der Felder; Bool-Syntax `AND`/`OR`/`NOT` je Feld) |
+| `record` | `id` | Einzelner Datensatz |
+| `records` | `ids` (kommagetrennt, max. 500) | Mehrere Datensätze in einem Aufruf |
+| `index` | `idx` (`qp`/`qt`/`qs`/`qj`/`qy`), `prefix`, `limit`, `offset` | A–Z-Register (Personen, Titelwörter, Schlagwörter, Zeitschriften, Jahre) |
+| `stats` | – | Bestandskennzahlen (Einträge, letzter Abgleich, Quelldatei, ausstehender Import) |
+
+**Suchfelder**: `q` = Freitext (alle Felder), `qt` = Titel, `qa` = Zusammenfassung,
+`qp` = Person(en)/Verfasser, `qj` = Zeitschrift/Quelle, `qs` = Schlagwort, `qy` = Jahr.
+Alle gesetzten Felder werden per AND kombiniert; ein gesetztes Feld ohne Treffer
+leert das Gesamtergebnis.
+
+**Sortierung** (`sort`): `relevance` (Vorgabe), `author_asc`, `author_desc`,
+`year_asc`, `year_desc`, `title_asc`, `title_desc`.
+
+**Paginierung**: `limit` (0–1000, Vorgabe 20; `0` = bis zum Sicherheitsdeckel 1000)
+und `offset` (ab 0).
+
+**„In Treffern suchen“** (Refine): `in` = Bool-Ausdruck, `inf` = Feld
+(`q`/`qt`/`qa`/`qp`/`qj`/`qs`/`qy`). Der Ausdruck wirkt ausschließlich auf die
+Treffermenge des Suchauftrags – nie auf den Gesamtbestand. Anders als im Frontend
+ist die Ausgangsmenge hier die volle Treffermenge (nicht nur die angezeigte Seite).
+
+### Beispiele
+
+```bash
+# Freitext-Suche, 20 Treffer, als JSON
+curl "https://opac.example.org/api.php?action=search&q=Digitalisierung"
+
+# Titelsuche, neueste zuerst, Seite 2 (je 25 Treffer)
+curl "https://opac.example.org/api.php?action=search&qt=Hochschule&sort=year_desc&limit=25&offset=25"
+
+# Verfeinern: in den Digitalisierungs-Treffern nur solche zu „Medien“
+curl "https://opac.example.org/api.php?action=search&q=Digitalisierung&in=Medien&inf=q"
+
+# Einzelner Datensatz
+curl "https://opac.example.org/api.php?action=record&id=97"
+
+# Personen-Register, alle „Sch…“
+curl "https://opac.example.org/api.php?action=index&idx=qp&prefix=Sch&limit=50"
+
+# Mit API-Key (Header)
+curl -H "X-API-Key: $OPAC_API_KEY" "https://opac.example.org/api.php?action=stats"
+```
+
+```r
+# R: Bestand durchsuchen
+library(jsonlite)
+res <- fromJSON("https://opac.example.org/api.php?action=search&q=Digitalisierung&limit=100")
+res$data$total
+res$data$records[, c("id", "title", "year", "doi")]
+```
+
+```python
+# Python
+import requests
+r = requests.get("https://opac.example.org/api.php",
+                 params={"action": "search", "qt": "Hochschule", "limit": 50},
+                 headers={"X-API-Key": "…"}).json()
+for rec in r["data"]["records"]:
+    print(rec["id"], rec["title"], rec["year"])
+```
+
+### Datensatzformat
+
+Jeder Treffer enthält u. a. `id`, `citekey`, `entry_type`, `type_label`, `title`,
+`subtitle`, `authors`, `editors`, `journal`, `year`, `volume`, `issue`, `pages`,
+`publisher`, `location`, `url`, `doi`, `isbn_issn`, `language`, `abstract`,
+`keywords` sowie das Feld `fields` mit den **unveränderten Originalfeldern**
+(z. B. direkt für einen BibTeX-Export nutzbar). Frontend-Markup (`html`) und der
+Volltextblob (`alltext`) werden in der API bewusst weggelassen.
 
 ## 🛠 Tech Stack
 

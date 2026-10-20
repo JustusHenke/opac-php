@@ -80,6 +80,13 @@ $DATA_SOURCE = "bibtex";
  * Leeres Secret (alle Quellen) => Import-Aktionen deaktiviert (fail-closed).
  */
 $OPAC_ADMIN_SECRET = "";
+
+/**
+ * API-Key für die JSON-API (api.php). Leer = API ohne Schlüssel nutzbar (nur
+ * lesend). Empfohlen: OPAC_API_KEY in der Datei .env. Reihenfolge:
+ * Umgebungsvariable/.env -> Wert hier (Fallback).
+ */
+$OPAC_API_KEY = "";
 /**
  * Hilfsfunktion: einfache Bool-Tokenisierung (AND/OR/NOT, keine Klammern).
  */
@@ -210,6 +217,42 @@ function check_admin_secret(?string $input): bool
         return false;
     }
     return hash_equals($secret, $input);
+}
+
+/**
+ * Effektiver API-Key für die JSON-API (api.php). Reihenfolge wie beim
+ * Admin-Secret: Umgebungsvariable/.env (OPAC_API_KEY) -> Fallback in config.php.
+ *
+ * Leerer Wert bedeutet: API ist ohne Schlüssel erreichbar (nur lesend). Ist ein
+ * Schlüssel gesetzt, muss er bei jeder Anfrage mitgeliefert werden (fail-closed).
+ */
+function opac_api_key(): string
+{
+    global $OPAC_API_KEY;
+    $key = (string) (getenv("OPAC_API_KEY") ?: "");
+    if ($key === "" && isset($_ENV["OPAC_API_KEY"])) {
+        $key = (string) $_ENV["OPAC_API_KEY"];
+    }
+    if ($key === "") {
+        $key = (string) ($OPAC_API_KEY ?? "");
+    }
+    return $key;
+}
+
+/**
+ * Prüft den mitgelieferten API-Key (timing-sicher). Ist kein Key konfiguriert,
+ * gilt die API als offen (true) – die API ist rein lesend.
+ */
+function check_api_key(?string $input): bool
+{
+    $key = opac_api_key();
+    if ($key === "") {
+        return true; // keine Konfiguration -> offener Lesezugriff
+    }
+    if ($input === null || $input === "") {
+        return false;
+    }
+    return hash_equals($key, $input);
 }
 
 /**
@@ -975,4 +1018,150 @@ function get_opac_library(): OpacLibrary
 function opac_record(int $id): ?array
 {
     return get_opac_library()->getRecord($id);
+}
+
+// ==================================================================== API
+// Wiederverwendbare Suchlogik für Frontend (msuche.php) und JSON-API (api.php).
+// Die API ist bewusst nur ein anderer Ausgang auf dieselbe Bestandsabfrage –
+// so können sich Frontend und Fernabfrage nie auseinanderentwickeln.
+
+/**
+ * Kanonische Feldnamen der Suchfelder (Frontend-Parameter => Registername).
+ * q  = Freitext (alle Felder), qt = Titel, qa = Zusammenfassung,
+ * qp = Personen/Verfasser, qj = Zeitschrift/Quelle, qs = Schlagwort, qy = Jahr.
+ *
+ * @return list<string>
+ */
+function opac_search_fields(): array
+{
+    return ['q', 'qt', 'qa', 'qp', 'qj', 'qs', 'qy'];
+}
+
+/**
+ * Registerbezeichnung je Feld, passend zur aktiven Datenquelle.
+ * BibLibrary erwartet Feldnamen, MidosIndex versteht beide (Feldname oder
+ * Legacy-Nummer), msuche.php übergibt daher einheitlich Feldnamen.
+ *
+ * @return array<string,int|string>
+ */
+function opac_field_indexes(): array
+{
+    return [
+        'qt' => 'qt', 'qa' => 'qa', 'qp' => 'qp',
+        'qj' => 'qj', 'qs' => 'qs', 'qy' => 'qy', 'q' => 'q',
+    ];
+}
+
+/**
+ * Führt eine Mehrfeld-Suche gegen den aktiven Bestand aus.
+ *
+ * Semantik identisch zu msuche.php: alle gesetzten Felder werden per AND
+ * verknüpft; innerhalb eines Feldes gilt die Bool-Syntax (AND/OR/NOT, auch
+ * UND/ODER/NICHT in Großschreibung). Ein gesetztes Feld ohne Treffer leert das
+ * Gesamtergebnis.
+ *
+ * @param array<string,string> $terms Feld => Suchbegriff (leere werden ignoriert)
+ * @return int[] Treffer-IDs (unabhängig von Sortierung/Anzeige)
+ */
+function opac_search(array $terms): array
+{
+    $lib = get_opac_library();
+    $index = opac_field_indexes();
+
+    $candidateIds = null;
+    foreach (opac_search_fields() as $key) {
+        $val = trim((string) ($terms[$key] ?? ''));
+        if ($val === '') {
+            continue;
+        }
+        $ids = $lib->searchBoolean($val, $index[$key]);
+        if ($ids === []) {
+            return [];
+        }
+        $candidateIds = $candidateIds === null
+            ? $ids
+            : array_values(array_intersect($candidateIds, $ids));
+        if ($candidateIds === []) {
+            return [];
+        }
+    }
+    return $candidateIds ?? [];
+}
+
+/**
+ * Suchauftrag ausführen, sortieren und Datensätze liefern.
+ *
+ * Kapselt exakt den Ablauf aus msuche.php (Suche -> optionale Sortierung ->
+ * Laden der Datensätze), damit die API dieselben Ergebnisse wie das Frontend
+ * zurückgibt. „In Treffern suchen“ (Refine) ist hier nicht sitzungsbasiert:
+ * die Ausgangsmenge ist die volle Treffermenge des Ausdrucks, die Verfeinerung
+ * wirkt darauf.
+ *
+ * @param array<string,string> $terms
+ * @param array{sort?:string,limit?:int,offset?:int,in?:string,inf?:string} $opts
+ * @return array{total:int,count:int,offset:int,limit:int,ids:int[],records:array<int,array>}
+ */
+function opac_search_result(array $terms, array $opts = []): array
+{
+    $lib = get_opac_library();
+    $sort = (string) ($opts['sort'] ?? 'relevance');
+    $limit = (int) ($opts['limit'] ?? 0);
+    $offset = max(0, (int) ($opts['offset'] ?? 0));
+
+    $baseIds = opac_search($terms);
+
+    // Verfeinerung ("in Treffern"): Bool-Ausdruck auf die Ausgangsmenge.
+    $refine = trim((string) ($opts['in'] ?? ''));
+    if ($refine !== '' && $baseIds !== []) {
+        $refineField = (string) ($opts['inf'] ?? 'q');
+        if (!in_array($refineField, opac_search_fields(), true)) {
+            $refineField = 'q';
+        }
+        $baseIds = refine_hits($lib, $baseIds, $refine, opac_field_indexes()[$refineField]);
+    }
+
+    if ($sort !== 'relevance' && $baseIds !== []) {
+        $baseIds = sort_hit_ids($baseIds, $lib->sortKeys($baseIds), $sort);
+    } else {
+        sort($baseIds, SORT_NUMERIC);
+    }
+
+    $total = count($baseIds);
+
+    // Ohne Limit (0) gilt ein Sicherheitsdeckel, damit eine Fernabfrage nicht
+    // versehentlich den gesamten Bestand in einer Antwort ausliefert.
+    $maxCap = 1000;
+    $take = $limit > 0 ? min($limit, $maxCap) : $maxCap;
+    $page = array_slice($baseIds, $offset, $take);
+
+    $records = [];
+    foreach ($page as $docId) {
+        $rec = $lib->getRecord((int) $docId);
+        if ($rec === null) {
+            continue;
+        }
+        $records[] = opac_record_public($rec);
+    }
+
+    return [
+        'total' => $total,
+        'count' => count($records),
+        'offset' => $offset,
+        'limit' => $take,
+        'ids' => array_map('intval', $page),
+        'records' => $records,
+    ];
+}
+
+/**
+ * Reduziert einen internen Datensatz auf die für die API gedachten Felder.
+ *
+ * Bewusst ohne 'html' (Frontend-Markup) und ohne 'alltext' (Volltextblob).
+ * Die Originalfelder (fields) bleiben erhalten, damit eine Fernabfrage den
+ * Datensatz vollständig weiterverarbeiten kann (z. B. BibTeX-Export).
+ */
+function opac_record_public(array $rec): array
+{
+    unset($rec['html'], $rec['alltext']);
+    return $rec;
 }
